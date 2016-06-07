@@ -69,6 +69,11 @@ type
     pos: TPoint;
   end;
 
+  TRBJumperWire = record
+    r: TRect;
+    highlight: boolean;
+  end;
+
   TRBcomponent = class(TObject)
     parent: TRoutaBoard;
     id: string;
@@ -94,7 +99,7 @@ type
     cells: array of array of TRBcell;
     points: array of TRBconnPoint;
     components: array of TRBcomponent;
-    jumperwires: array of TRect;
+    jumperwires: array of TRBJumperWire;
     aSize: TPoint;
     cZoom: Double;
     cOffst: TPoint;
@@ -142,6 +147,9 @@ type
 
     function AddJumperWire(pt1, pt2: TPoint): integer;
     procedure DrawJumperWire(idx: integer; var pb: TPaintBox32; zoom: Double; offst: TPoint);
+    function FindJumperWire(pt1: TPoint): integer;
+    function FindJumperWireTo(pt1: TPoint; var res: TPoint): integer;
+    procedure DeleteJumperWire(idx: integer);
 
     function DecodeXref(str: string; var pt: TPoint; var c: AnsiChar; var bus: string): boolean;
     function flStripComment(str: string): string;
@@ -185,7 +193,7 @@ type
     ppDeletePin: TMenuItem;
     N1: TMenuItem;
     ppAddComponent: TMenuItem;
-    PopupMenu2: TPopupMenu;
+    BoardSelPopup: TPopupMenu;
     ToolButton7: TToolButton;
     ToolButton8: TToolButton;
     ToolButton10: TToolButton;
@@ -196,11 +204,16 @@ type
     SavePopupMenu: TPopupMenu;
     S1: TMenuItem;
     S2: TMenuItem;
-    PopupMenu3: TPopupMenu;
+    HelpPopup: TPopupMenu;
     MenuItem7: TMenuItem;
     N3: TMenuItem;
     A1: TMenuItem;
     ImageList1: TImageList;
+    PopupMenu2: TPopupMenu;
+    ppAddJumperWire: TMenuItem;
+    ppDeleteJumperWire: TMenuItem;
+    N4: TMenuItem;
+    ppCancelJumperWire: TMenuItem;
     procedure FormCreate(Sender: TObject);
     procedure pb1PaintBuffer(Sender: TObject);
     procedure pb1MouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
@@ -229,6 +242,11 @@ type
     procedure FormCloseQuery(Sender: TObject; var CanClose: Boolean);
     procedure MenuItem7Click(Sender: TObject);
     procedure A1Click(Sender: TObject);
+    procedure pb1MouseWheel(Sender: TObject; Shift: TShiftState;
+      WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+    procedure ppAddJumperWireClick(Sender: TObject);
+    procedure ppCancelJumperWireClick(Sender: TObject);
+    procedure ppDeleteJumperWireClick(Sender: TObject);
 
   private
     VisibleCells: TRect;
@@ -242,10 +260,17 @@ type
     compMove, compPin: TRect;
     dblclick: boolean;
     filechanged: boolean;
+    newJumperWire: TRect;
+    JWTL: TPoint;
+    rbPoint: TPoint;
+
     function fGetVisibleCells: Trect;
     procedure scroll1MyScroll(Sender: TObject);
     function CheckHighlight: boolean;
     procedure CorrectPopup1(comp, pin: integer);
+    procedure CorrectPopup2(pt1: TPoint);
+    function isDragMove(pt1,pt2: TPoint): boolean;
+
   public
     RB: TRoutaBoard;
     LastFileName: string;
@@ -614,6 +639,40 @@ begin
     SetLength(cells[x],aSize.Y);
 end;
 
+function TRoutaBoard.FindJumperWire;
+var
+  z: integer;
+begin
+  for z := 0 to HIGH(jumperwires) do
+    if PointsEqual(jumperwires[z].r.TopLeft,pt1) or PointsEqual(jumperwires[z].r.BottomRight,pt1) then
+    begin
+      result := z;
+      exit;
+    end;
+  Result := -1;
+end;
+
+function TRoutaBoard.FindJumperWireTo;
+var
+  z: integer;
+begin
+  for z := 0 to HIGH(jumperwires) do
+    if PointsEqual(jumperwires[z].r.TopLeft,pt1) then
+    begin
+      res := jumperwires[z].r.BottomRight;
+      result := z;
+      exit;
+    end
+    else
+    if PointsEqual(jumperwires[z].r.BottomRight,pt1) then
+    begin
+      res := jumperwires[z].r.TopLeft;
+      result := z;
+      exit;
+    end;
+  Result := -1;
+end;
+
 constructor TRoutaBoard.Create(size: TPoint);
 var
   x: integer;
@@ -791,11 +850,15 @@ var
   clr: TColor32;
   afp: TArrayOfFixedPoint;
 begin
-  clr := $FF000000 or $e6b800;
   with jumperwires[idx] do
   begin
-    body.TopLeft := GetCellCoords(TopLeft, zoom, offst);
-    body.BottomRight := GetCellCoords(BottomRight, zoom, offst);
+    if highlight then
+      clr := $FF000000 or $ffe680
+    else
+      clr := $FF000000 or $f2be0d;
+
+    body.TopLeft := GetCellCoords(r.TopLeft, zoom, offst);
+    body.BottomRight := GetCellCoords(r.BottomRight, zoom, offst);
     SetLength(afp,2);
     afp[0] := FixedPoint(body.Left,body.Top);
     afp[1] := FixedPoint(body.Right,body.Bottom);
@@ -1023,7 +1086,7 @@ end;
 function TRoutaBoard.AddJumperWire;
 begin
   SetLength(jumperwires,Length(jumperwires)+1);
-  jumperwires[HIGH(jumperwires)] := Rect(pt1,pt2);
+  jumperwires[HIGH(jumperwires)].r := Rect(pt1,pt2);
   result := HIGH(jumperwires);
 end;
 
@@ -1169,6 +1232,15 @@ begin
   CheckConn;
 end;
 
+procedure TRoutaBoard.DeleteJumperWire(idx: integer);
+begin
+  if Length(jumperwires)>idx then
+  begin
+    jumperwires[idx] := jumperwires[HIGH(jumperwires)];
+    SetLength(jumperwires,Length(jumperwires)-1);
+  end;
+end;
+
 function TRBcomponent.AddPin;
 begin
   SetLength(pins,Length(pins)+1);
@@ -1203,13 +1275,15 @@ begin
       cells[x][y].highlight := false;
   for x := 0 to HIGH(bus) do
     bus[x].highlight := false;
+  for x := 0 to HIGH(jumperwires) do
+    jumperwires[x].highlight := false;
 end;
 
 procedure TRoutaBoard.SetHighLight;
 begin
   if pt.x<0 then
     exit;
-  cells[pt.X,pt.Y].highlight := true;
+//  cells[pt.X,pt.Y].highlight := true;
   HighlightNet(pt);
 end;
 
@@ -1238,6 +1312,8 @@ var
   z: integer;
   p2: TPoint;
 begin
+  if cells[pt.X,pt.Y].highlight then
+    exit;
   cells[pt.X,pt.Y].highlight := true;
   for z := 0 to HIGH(points) do
     if PointsEqual(points[z].c1,pt) then
@@ -1258,6 +1334,13 @@ begin
         if not cells[p2.X,p2.Y].highlight then
           HighlightNet(p2);
     end;
+
+  z := FindJumperWireTo(pt,p2);
+  if z>=0 then
+  begin
+    jumperwires[z].highlight := true;
+    HighlightNet(p2);
+  end;
 end;
 
 procedure TForm1.FormCloseQuery(Sender: TObject; var CanClose: Boolean);
@@ -1310,6 +1393,7 @@ begin
   compMove.Bottom := -1;
   compPin.Bottom := -1;
   LoadBoardTypes;
+  newJumperWire.TopLeft := Point(-1,-1);
   Application.ProcessMessages;
 end;
 
@@ -1346,6 +1430,8 @@ var
   i,pin: integer;
 begin
   lastPoint := Point(x,y);
+  rbPoint := Point(x+scroll1.HorzScrollBar.Position, y+scroll1.VertScrollBar.Position);
+//  statusbar.Caption := IntToStr(rbPoint.X) + ':' + IntToStr(rbPoint.Y);
   if Button = mbRight then
   begin
     if editMode = emEdComponent then
@@ -1368,6 +1454,7 @@ begin
     end
     else
     begin
+
       dragPoint := AddPoints(Mouse.CursorPos,Point(scroll1.HorzScrollBar.Position,scroll1.VertScrollBar.Position));
       pb1.Cursor := crSizeAll;
       exit;
@@ -1437,13 +1524,24 @@ begin
       begin
         if Button = mbLeft then
         begin
-          if not CheckHighlight then
-            if RB.hasHigh then
+          if newJumperWire.Left >=0 then
+          begin
+            if RB.FindCellPoint(Point(X,Y),PT) then
             begin
-              RB.ClearHighLight;
-              RB.hasHigh := false;
+              newJumperWire.BottomRight := PT;
+              RB.AddJumperWire(newJumperWire.TopLeft,newJumperWire.BottomRight);
+              newJumperWire.Left := -1;
               pb1.Repaint;
             end;
+          end
+          else
+            if not CheckHighlight then
+              if RB.hasHigh then
+              begin
+                RB.ClearHighLight;
+                RB.hasHigh := false;
+                pb1.Repaint;
+              end;
         end;
       end;
     end;
@@ -1482,6 +1580,18 @@ begin
       pb1.Repaint;
       result := true;
     end
+  end;
+end;
+
+procedure TForm1.ppDeleteJumperWireClick(Sender: TObject);
+var
+  i: Integer;
+begin
+  i := RB.FindJumperWire(JWTL);
+  if i>=0 then
+  begin
+    RB.DeleteJumperWire(i);
+    pb1.Repaint;
   end;
 end;
 
@@ -1554,24 +1664,31 @@ begin
       s := RB.PointToText(p);
       statusbar.Caption := s;
 
-      if RB.FindConnPoint(Point(X,Y),rbcp) then
+      if newJumperWire.Left>=0 then
       begin
-        fp := RB.GetConnCoord(rbcp.position,rbcp.is_row,RB.cZoom,RB.cOffst);
-        R := Rect(Round(fp.X-(cRBpoint-2)*RB.cZoom),Round(fp.Y-(cRBpoint-2)*RB.cZoom),Round(fp.X+(cRBpoint-1)*RB.cZoom),Round(fp.Y+(cRBpoint-1)*RB.cZoom));
-        if rbcp.index>=0 then
-          pb1.Canvas.Brush.Color := clYellow
-        else
-          pb1.Canvas.Brush.Color := clLime;
-        pb1.Canvas.Pen.Color := pb1.Canvas.Brush.Color;
-        pb1.Canvas.Ellipse(R);
-        lastfind := true;
+        pb1.Repaint;
       end
       else
       begin
-        if lastfind then
+        if RB.FindConnPoint(Point(X,Y),rbcp) then
         begin
-          pb1.Repaint;
-          lastfind := false;
+          fp := RB.GetConnCoord(rbcp.position,rbcp.is_row,RB.cZoom,RB.cOffst);
+          R := Rect(Round(fp.X-(cRBpoint-2)*RB.cZoom),Round(fp.Y-(cRBpoint-2)*RB.cZoom),Round(fp.X+(cRBpoint-1)*RB.cZoom),Round(fp.Y+(cRBpoint-1)*RB.cZoom));
+          if rbcp.index>=0 then
+            pb1.Canvas.Brush.Color := clYellow
+          else
+            pb1.Canvas.Brush.Color := clLime;
+          pb1.Canvas.Pen.Color := pb1.Canvas.Brush.Color;
+          pb1.Canvas.Ellipse(R);
+          lastfind := true;
+        end
+        else
+        begin
+          if lastfind then
+          begin
+            pb1.Repaint;
+            lastfind := false;
+          end;
         end;
       end;
     end;
@@ -1627,15 +1744,16 @@ end;
 procedure TForm1.pb1MouseUp(Sender: TObject; Button: TMouseButton;
   Shift: TShiftState; X, Y: Integer);
 var
-  pt: TPoint;
+  pt,rbp: TPoint;
   i, pin: integer;
 begin
-  dragPoint.X := -1;
   pb1.Cursor := crDefault;
+  rbp := Point(x+scroll1.HorzScrollBar.Position, y + scroll1.VertScrollBar.Position);
+//  statusbar.Caption := statusbar.Caption + ' >> ' + IntToStr(rbP.X) + ':' + IntToStr(rbP.Y);
   case editMode of
     emEdComponent:
     begin
-      if Button = mbRight then
+      if not isDragMove(rbPoint,rbp) and (Button = mbRight) then
       begin
         pt := pb1.ClientToScreen(Point(x,y));
         i := RB.FindComponent(Point(X,Y),pin);
@@ -1652,8 +1770,52 @@ begin
       compPin.Bottom := -1;
       pb1.Repaint;
     end;
+
+    emEdBoard:
+    begin
+      if not isDragMove(rbPoint,rbp) and (Button = mbRight) then
+      begin
+        RB.FindCellPoint(Point(x,y),pt);
+        if (pt.X>=0) and (pt.Y>=0) then
+        begin
+          JWTL := pt;
+          CorrectPopup2(JWTL);
+          pt := pb1.ClientToScreen(Point(x,y));
+          PopupMenu2.Popup(pt.X,pt.Y);
+        end;
+      end;
+    end;
   end;
+  dragPoint.X := -1;
   dblclick := false;
+end;
+
+procedure TForm1.pb1MouseWheel(Sender: TObject; Shift: TShiftState;
+  WheelDelta: Integer; MousePos: TPoint; var Handled: Boolean);
+var
+  i: integer;
+begin
+  if Shift=[ssCtrl] then
+  begin
+    i := scroll1.HorzScrollBar.Position;
+    i := i - WheelDelta;
+    if i < 0 then i := 0;
+    if i > scroll1.HorzScrollBar.Range then
+      i := scroll1.HorzScrollBar.Range;
+    scroll1.HorzScrollBar.Position := i;
+    Handled := true;
+  end
+  else
+  begin
+    i := scroll1.VertScrollBar.Position;
+    i := i - WheelDelta;
+    if i < 0 then i := 0;
+    if i > scroll1.VertScrollBar.Range then
+      i := scroll1.VertScrollBar.Range;
+    scroll1.VertScrollBar.Position := i;
+    Handled := true;
+  end;
+  scroll1MyScroll(nil);
 end;
 
 function TForm1.fGetVisibleCells: Trect;
@@ -1672,6 +1834,7 @@ procedure TForm1.pb1PaintBuffer(Sender: TObject);
 var
   x,y: integer;
   mr: TRect;
+  pt: TPoint;
 begin
   RB.cOffst.X := 0; //-scrollX.Position;
   RB.cOffst.Y := 0; //-scrollY.Position;
@@ -1711,6 +1874,12 @@ begin
 
   for x := 0 to HIGH(RB.jumperwires) do
     RB.DrawJumperWire(x,pb1,RB.cZoom,RB.cOffst);
+
+  if newJumperWire.Left>=0 then
+  begin
+    pt := RB.GetCellCoords(newJumperWire.TopLeft,RB.cZoom,RB.cOffst);
+    pb1.Buffer.LineS(pt.X,pt.Y,lastPoint.X,lastPoint.Y,clYellow32);
+  end;
 
   pb1.Flush;
 end;
@@ -1860,6 +2029,14 @@ begin
   for z := 0 to HIGH(components) do
     sl.Add(components[z].GetAsString);
 
+  sl.Add('');
+  sl.Add(''' Jumper wires');
+  for z := 0 to HIGH(jumperwires) do
+    begin
+      s := PointToText(jumperwires[z].r.TopLeft)+'J'+':'+PointToText(jumperwires[z].r.BottomRight)+'J';
+      sl.Add(s);
+    end;
+
   sl.SaveToFile(filename);
   sl.Free;
 end;
@@ -1972,6 +2149,11 @@ begin
   end;
 end;
 
+procedure TForm1.ppAddJumperWireClick(Sender: TObject);
+begin
+  newJumperWire.TopLeft := JWTL;
+end;
+
 procedure TForm1.A1Click(Sender: TObject);
 begin
   fSplash.ShowModal;
@@ -1985,6 +2167,7 @@ var
 begin
   if (Msg.message = WM_KEYDOWN) then
   begin
+//    statusbar.Caption := IntToHex(msg.wParam,8);
     if msg.wParam = $20 then // Space
     begin
       if compMove.Bottom>=0 then
@@ -2001,8 +2184,20 @@ begin
         RB.MirrorComponent(compMove.Bottom);
         pb1.Repaint;
       end;
+    end
+    else
+    if msg.wParam = $1B then  // ESC
+    begin
+      newJumperWire.Left := -1;
+      pb1.Repaint;
     end;
+  end
+{
+  else if (msg.message = WM_MOUSEWHEEL) then
+  begin
+    statusbar.Caption := IntToStr(msg.wParam);
   end;
+}
 end;
 
 procedure TForm1.LoadBoardTypes;
@@ -2022,11 +2217,11 @@ begin
     s := Copy(sl[z],i+1,9999);
     p.X := StrToIntDef(Copy(s,1,pos(',',s)-1),1);
     p.Y := StrToIntDef(Copy(s,pos(',',s)+1),9999);
-    mi := TMenuItem.Create(PopupMenu2);
+    mi := TMenuItem.Create(BoardSelPopup);
     MI.Caption := Copy(sl[z],1,i-1);
     MI.Tag := P.X or P.Y shl 16;
     MI.OnClick := SelectBoardClick;
-    PopupMenu2.Items.Add(MI);
+    BoardSelPopup.Items.Add(MI);
   end;
 end;
 
@@ -2056,6 +2251,16 @@ begin
   ppAddToLibrary.Enabled := (comp>=0);
 end;
 
+procedure TForm1.CorrectPopup2;
+var
+  i: integer;
+begin
+  i := RB.FindJumperWire(pt1);
+  ppAddJumperWire.Enabled := i<0;
+  ppDeleteJumperWire.Enabled := i>=0;
+  ppCancelJumperWire.Enabled := newJumperWire.Left>=0;
+end;
+
 procedure TForm1.ppAddToLibraryClick(Sender: TObject);
 var
   sl: TStringList;
@@ -2080,9 +2285,20 @@ begin
   end;
 end;
 
+procedure TForm1.ppCancelJumperWireClick(Sender: TObject);
+begin
+  newJumperWire.Left := -1;
+  pb1.Repaint;
+end;
+
 procedure TForm1.MenuItem7Click(Sender: TObject);
 begin
   Application.HelpShowTableOfContents;
+end;
+
+function TForm1.isDragMove;
+begin
+  result := (Abs(pt1.X-pt2.X)>2) or (Abs(pt1.Y-pt2.Y)>2);
 end;
 
 end.
