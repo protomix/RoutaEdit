@@ -1,1 +1,6 @@
 Current version is 0.5.3.2
+--- 2016-06-18
+Added Support form Doube sided boards
+Some bugs improvement
+
+Initial version 0.5.0.0
