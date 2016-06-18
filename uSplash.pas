@@ -40,7 +40,7 @@ begin
   Width := Image1.Width;
   Height := Image1.Height;
   Image1.Canvas.Draw(0, 0, jpg);
-  Image1.Canvas.TextOut(25,80,'Version '+FormattedCurrentVersion);
+  Image1.Canvas.TextOut(18,80,'Version '+FormattedCurrentVersion);
   jpg.Free;
   RS.Free;
 end;

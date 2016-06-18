@@ -1,5 +1,10 @@
-Routaboard Mini 12x16$12,16
-Routaboard Entry 16x20$16,20
-Routaboard Standard 24x32$24,32
-Routaboard Extended 32x32$32,32
-Routaboard Mega 40x40$40,40
+Routaboard Mini 12x16$12,16,1
+Routaboard Entry 16x24$16,24,1
+Routaboard Standard 24x32$24,32,1
+Routaboard Extended 32x32$32,32,1
+Routaboard Mega 40x40$40,40,1
+Routaboard Mini 12x16 Double$12,16,2
+Routaboard Entry 16x24 Double$16,24,2
+Routaboard Standard 24x32 Double$24,32,2
+Routaboard Extended 32x32 Double$32,32,2
+Routaboard Mega 40x40 Double$40,40,2

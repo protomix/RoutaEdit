@@ -3,7 +3,7 @@ unit Unit1;
 interface
 
 uses
-  HTMLHelpViewer,
+  HTMLHelpViewer, Printers,
   Windows, Types, Messages, SysUtils, StrUtils, Variants, Classes, Graphics, Controls, Forms,
   GR32, GR32_Image, GR32_Polygons ,G32_Interface,
   Dialogs, StdCtrls, ExtCtrls, sPanel, ComCtrls, Buttons, ToolWin, ImgList, Menus;
@@ -12,9 +12,11 @@ const
   cRBcellSize = 100;
   cRBcellHalf = 50;
   cRBcellHalfMinus = 45;
-  cRBcellQuater = 25;
+  cRBcellHalfPlus = 55;
+  cRBcellQuarter = 25;
   cRBdiaIn = 15;
   cRBdiaOut = 24;
+  cRBdiaOutJW = 20;
   cRBpadWidth = 22;
   cRBpadHeight = 8;
   cRBtrackDia = 5;
@@ -26,6 +28,8 @@ const
 
   my1colorBoard = TColor32($FF0F50A0);
   my1colorBrdCircle = TColor32($FF6090FF);
+  my2colorBoard = TColor32($FFA0500F);
+  my2colorBrdCircle = TColor32($FFFF9060);
   my1colorBrdHigh = TColor32($FFCCCC90);
   my1colorBackground = TColor32($FF000000);
   my1colorLegendText = TColor32($FFFFCC88);
@@ -55,6 +59,7 @@ type
   TRBconnPoint = record
     index: integer;
     is_row: boolean;
+    zpos: integer;
     position: TPoint;
     c1, c2: TPoint;
   end;
@@ -72,6 +77,11 @@ type
   TRBJumperWire = record
     r: TRect;
     highlight: boolean;
+  end;
+
+  TRBhTracks = record
+    highlight: array[0..1] of boolean;
+    connected: array[0..1] of boolean;
   end;
 
   TRBcomponent = class(TObject)
@@ -97,61 +107,69 @@ type
 
   TRoutaBoard = class(TObject)
     cells: array of array of TRBcell;
-    points: array of TRBconnPoint;
+    points: array[boolean] of array of TRBconnPoint;
     components: array of TRBcomponent;
     jumperwires: array of TRBJumperWire;
+    hTracks: array of TRBhTracks;
     aSize: TPoint;
     cZoom: Double;
     cOffst: TPoint;
-    bus: array[0..2] of TRBbus;
+    bus: array[0..4] of TRBbus;
     hasHigh: boolean;
     cs: TRBcolorScheme;
+    DoubleSide: boolean;
+    CurrentLayer: boolean;
 
-    constructor Create(size: TPoint);
-    procedure InitSize(size: TPoint);
+    constructor Create(size: TPoint; isDouble: boolean);
+    procedure InitSize(size: TPoint; isDouble: boolean);
     procedure ClearBoard;
-    function TextToPoint(str: string; var c: AnsiChar): TPoint;
-    function PointToText(pt: TPoint): string;
-    function ConnLetter(pt: TPoint; idx: integer): string;
+    function TextToPoint(str: string; var c: AnsiChar; aLayer: boolean): TPoint;
+    function PointToText(pt: TPoint; aLayer: boolean): string;
+    function ConnLetter(pt: TPoint; idx: integer; aLayer: boolean): string;
+    function hTrackLetter(zpos: integer): string;
+    function hTrackBus(zpos: integer): string;
 
     procedure LoadDefaultColorScheme;
-    function GetCellCoords(cell: TPoint; zoom: Double; offst: TPoint): TPoint;
+    function GetCellCoords(cell: TPoint; zoom: Double; offst: TPoint; mirror: boolean = false): TPoint;
     function GetCoordsCell(coord: TPoint): TPoint;
     function PointToBus(coord: TPoint): integer;
     function GetVisibleCells(coord: TRect): TRect;
-    procedure DrawCell(var pb: TPaintBox32; cell: TPoint; zoom: Double; offst: TPoint);
-    procedure DrawSideTrack(var pb: TPaintBox32; zoom: Double; offst: TPoint; track: integer);
-    procedure DrawLegend(var pb: TPaintBox32; zoom: Double; offst: TPoint);
+    procedure DrawCell(const buffer: TBitmap32; cell: TPoint; zoom: Double; offst: TPoint);
+    procedure DrawBus(const buffer: TBitmap32; zoom: Double; offst: TPoint; track: integer);
+    procedure DrawLegend(const buffer: TBitmap32; zoom: Double; offst: TPoint);
+    procedure DrawHTrack(const buffer: TBitmap32; track: integer; zoom: Double; offst: TPoint);
 
     function FindConnPoint(coord: TPoint; var cp: TRBconnPoint): boolean;
     function FindCellPoint(coord: TPoint; var tp: TPoint): boolean;
     function FindComponent(coord: TPoint; var aPin: integer): integer;
-    function FindConnPointByPosition(coord: TPoint; aIs_row: boolean): integer;
-    function GetConnCoord(pos: TPoint; is_row: boolean; zoom: Double; offst: TPoint): TFloatPoint;
-    procedure DrawConns(var pb: TPaintBox32; zoom: Double; offst: TPoint);
+    function FindConnPointByPosition(coord: TPoint; aIs_row: boolean; aZpos: integer): integer;
+    function GetConnCoord(pos: TPoint; is_row: boolean; zoom: Double; offst: TPoint; zpos: integer): TFloatPoint;
+    procedure DrawConns(const buffer: TBitmap32; zoom: Double; offst: TPoint);
     function CalcSize(zoom: double): TPoint;
-    procedure SetHighLight(pt: TPoint);
+    procedure SetHighLight(pt: TPoint; isbus: boolean);
     procedure ClearHighLight;
     procedure CheckConn;
-    procedure AddConnPointByP1P2(p1,p2: TPoint; c1,c2: AnsiChar; bus1, bus2: integer);
-    function AddConn(const pnt: TRBconnPoint): integer;
-    procedure DeleteConn(idx: integer);
+    function GetRealDblSidePoint(pt:TPoint; aLayer: boolean): TPoint;
+    procedure AddConnPointByP1P2(p1,p2: TPoint; c1,c2: AnsiChar; bus1, bus2: integer; aLayer: boolean; cmd: string);
+    function AddConn(const pnt: TRBconnPoint; aLayer: boolean): integer;
+    procedure DeleteConn(idx: integer; aLayer: boolean);
 
     procedure HighlightBus(busNo: integer);
     procedure HighlightNet(pt: TPoint);
+    procedure HighlightHtrack(track: TPoint);
 
     function AddComponent(const c: TRBcomponent; newid: string): integer;
     procedure DeleteComponent(idx: integer);
-    procedure DrawComponent(const component1: TRBcomponent; const pb: TBitmap32; zoom: Double; offst: TPoint; clr: TColor32; hipin: integer);
+    procedure DrawComponent(const component1: TRBcomponent; const buffer: TBitmap32; zoom: Double; offst: TPoint; clr: TColor32; hipin: integer);
     function GetComponentByID(id: string): integer;
 
     function AddJumperWire(pt1, pt2: TPoint): integer;
-    procedure DrawJumperWire(idx: integer; var pb: TPaintBox32; zoom: Double; offst: TPoint);
+    procedure DrawJumperWire(idx: integer; const buffer: TBitmap32; zoom: Double; offst: TPoint);
     function FindJumperWire(pt1: TPoint): integer;
     function FindJumperWireTo(pt1: TPoint; var res: TPoint): integer;
     procedure DeleteJumperWire(idx: integer);
 
-    function DecodeXref(str: string; var pt: TPoint; var c: AnsiChar; var bus: string): boolean;
+    function DecodeXref(str: string; var pt: TPoint; var c: AnsiChar; var bus: string; aLayer: boolean): boolean;
     function flStripComment(str: string): string;
     function flDecode(str: string): integer;
     procedure LoadFromFile(filename: string);
@@ -159,6 +177,9 @@ type
     function BusToPoint(bus: string): integer;
     function RotateComponent(id: integer): boolean;
     function MirrorComponent(id: integer): boolean;
+
+    function IntToRef(i: integer; aLayer: boolean): string;
+    function RefToInt(ref: string; aLayer: boolean): integer;
   end;
 
   TScrollBox=Class(Forms.TScrollBox)
@@ -214,6 +235,11 @@ type
     ppDeleteJumperWire: TMenuItem;
     N4: TMenuItem;
     ppCancelJumperWire: TMenuItem;
+    btnTop: TToolButton;
+    btnBottom: TToolButton;
+    ToolButton13: TToolButton;
+    btnPrint: TToolButton;
+    PrintDialog1: TPrintDialog;
     procedure FormCreate(Sender: TObject);
     procedure pb1PaintBuffer(Sender: TObject);
     procedure pb1MouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
@@ -247,6 +273,8 @@ type
     procedure ppAddJumperWireClick(Sender: TObject);
     procedure ppCancelJumperWireClick(Sender: TObject);
     procedure ppDeleteJumperWireClick(Sender: TObject);
+    procedure btnTopClick(Sender: TObject);
+    procedure btnPrintClick(Sender: TObject);
 
   private
     VisibleCells: TRect;
@@ -270,6 +298,9 @@ type
     procedure CorrectPopup1(comp, pin: integer);
     procedure CorrectPopup2(pt1: TPoint);
     function isDragMove(pt1,pt2: TPoint): boolean;
+    procedure DrawOnB32(const buffer: TBitmap32; cZoom: Double; cOffst: TPoint);
+    procedure DoSaveAs;
+    procedure Debug1;
 
   public
     RB: TRoutaBoard;
@@ -337,16 +368,37 @@ BEGIN
   END
 END {SubtractPoints};
 
-function IntToRef(i: integer): string;
+procedure xNormalizeRect(var r: TRect);
+var
+  i: integer;
 begin
-  dec(i);
+  if r.Left > r.Right then
+  begin
+    i := r.Right;
+    r.Right := r.Left;
+    r.Left := i;
+  end;
+  if r.Top > r.Bottom then
+  begin
+    i := r.Bottom;
+    r.Bottom := r.Top;
+    r.Top := i;
+  end;
+end;
+
+function TRoutaBoard.IntToRef;
+begin
+  if not aLayer then
+    i := aSize.X - i
+  else
+    dec(i);
   if i < 0 then i := 0;
   result := chr($41 + i mod 26);
   if (i > 25) then
     result := chr($40 + (i div 26) mod 26) + result;
 end;
 
-function RefToInt(ref: string): integer;
+function TRoutaBoard.RefToInt;
 var
   c: AnsiChar;
   z,r: integer;
@@ -386,13 +438,29 @@ begin
   result := -1;
 end;
 
+function TRoutaBoard.hTrackLetter;
+begin
+  if zpos = 0 then
+    result := 'U'
+  else
+    result := 'D';
+end;
+
+function TRoutaBoard.hTrackBus;
+begin
+  if zpos = 0 then
+    result := '4'
+  else
+    result := '5';
+end;
+
 function TRoutaBoard.ConnLetter;
 begin
   result := '';
 
   if pt.X<0 then exit;
 
-  with points[idx] do
+  with points[aLayer][idx] do
     if is_row then
     begin
       if position.Y>pt.Y then
@@ -423,6 +491,7 @@ end;
 function TRoutaBoard.DecodeXref;
 var
   i: integer;
+  s: string;
 begin
   result := true;
   i := pos('*',str);
@@ -431,10 +500,18 @@ begin
     pt := Point(-1,-1);
     c := #0;
     bus := copy(str,i+1,9999);
+    s := copy(bus,1,1);
+    if (s='D') or (s='U') then
+    begin
+      c := AnsiChar(s[1]);
+      pt.Y := StrToIntDef(copy(bus,2,9999),-1);
+      bus := copy(bus,2,9999);
+      if bus='' then bus := '0';
+    end;
   end
   else
   begin
-    pt := TextToPoint(str,c);
+    pt := TextToPoint(str,c,aLayer);
     bus := '';
   end;
 end;
@@ -451,44 +528,56 @@ var
   bus,bus2: string;
 begin
   result := -1;
-  sl := TStringList.Create;
-  sl.Delimiter := ' ';
-  sl.DelimitedText := Trim(flStripComment(str));
-  for z := 0 to sl.Count-1 do
+  i := Pos('''',str);
+  if i > 0 then
+    str := copy(str,1,i-1);
+
+  if Pos('TOP',UpperCase(str))=1 then
+    CurrentLayer := true
+  else
+  if Pos('BOTTOM',UpperCase(str))=1 then
+    CurrentLayer := false
+  else
   begin
-    s := Trim(sl[z]);
-    i := pos('/',str);
-    if i>0 then
+    sl := TStringList.Create;
+    sl.Delimiter := ' ';
+    sl.DelimitedText := Trim(flStripComment(str));
+    for z := 0 to sl.Count-1 do
     begin
-      cname := copy(s,1,i-1);
-      cid := GetComponentByID(cname);
-      if cid<0 then
-        cid := AddComponent(nil,cname);
-      components[cid].AppendPin(copy(s,i+1,9999));
-    end
-    else
-    begin
-      i := Pos(':',s);
-      if i > 0 then
+      s := Trim(sl[z]);
+      i := pos('/',str);
+      if i>0 then
       begin
-        if DecodeXref(copy(s,1,i-1),pt,c,bus) then
-          if DecodeXref(copy(s,i+1,9999),pt2,c2,bus2) then
-          begin
-            if (c='J') or (c2='J') then
-              AddJumperWire(pt,pt2)
-            else
-              AddConnPointByP1P2(pt,pt2,c,c2,BusToPoint(bus),BusToPoint(bus2));
-          end;
+        cname := copy(s,1,i-1);
+        cid := GetComponentByID(cname);
+        if cid<0 then
+          cid := AddComponent(nil,cname);
+        components[cid].AppendPin(copy(s,i+1,9999));
+      end
+      else
+      begin
+        i := Pos(':',s);
+        if i > 0 then
+        begin
+          if DecodeXref(copy(s,1,i-1),pt,c,bus,CurrentLayer) then
+            if DecodeXref(copy(s,i+1,9999),pt2,c2,bus2,CurrentLayer) then
+            begin
+              if (c='J') or (c2='J') then
+                AddJumperWire(pt,pt2)
+              else
+                AddConnPointByP1P2(pt,pt2,c,c2,BusToPoint(bus),BusToPoint(bus2),CurrentLayer,str);
+            end;
+        end;
       end;
     end;
+    sl.Free;
   end;
-  sl.Free;
 end;
 
 function TRoutaBoard.PointToText;
 begin
   if pt.X>=0 then
-    result := IntToRef(pt.X+1)+IntToStr(aSize.Y-pt.Y)
+    result := IntToRef(pt.X+1,aLayer)+IntToStr(aSize.Y-pt.Y)
   else
     result := '*'+IntToStr(pt.Y+1);
 end;
@@ -510,7 +599,7 @@ begin
         c := a2[code]
       else c := #0;
       result.Y := aSize.Y - i;
-      result.X := RefToInt(copy(ass,1,z-1));
+      result.X := RefToInt(copy(ass,1,z-1),aLayer);
       exit;
     end;
   result := Point(-1,-1);
@@ -572,7 +661,7 @@ begin
     z := Length(pins);
     SetLength(pins,z+1);
     pins[z].name := Copy(str_pin,1,i-1);
-    pins[z].pos := parent.TextToPoint(Copy(str_pin,i+1,999),c);
+    pins[z].pos := parent.TextToPoint(Copy(str_pin,i+1,999),c,parent.CurrentLayer);
   end;
 end;
 
@@ -592,7 +681,7 @@ begin
     if i > 0 then
     begin
       pins[z].name := Copy(sl[z],1,i-1);
-      pins[z].pos := parent.TextToPoint(Copy(sl[z],i+1,999),c);
+      pins[z].pos := parent.TextToPoint(Copy(sl[z],i+1,999),c,parent.CurrentLayer);
     end;
   end;
   sl.Free;
@@ -603,40 +692,63 @@ procedure TRoutaBoard.CheckConn;
 var
   x,y,z: integer;
 begin
-  for z := 0 to High(points) do
-    if points[z].is_row then
+  for z := 0 to High(points[true]) do
+    with points[true][z] do
     begin
-      if points[z].position.Y=0 then
-        points[z].c1 := Point(-1,2)
+      if is_row then
+      begin
+        if position.Y=0 then
+          c1 := Point(-1,2)
+        else
+          c1 := Point((position.X-1) div 2, position.Y-1);
+        if position.Y=aSize.Y then
+          c2 := Point(-1,0)
+        else
+          c2 := Point(position.X div 2, position.Y);
+      end
       else
-        points[z].c1 := Point((points[z].position.X-1) div 2, points[z].position.Y-1);
-      if points[z].position.Y=aSize.Y then
-        points[z].c2 := Point(-1,0)
-      else
-        points[z].c2 := Point(points[z].position.X div 2, points[z].position.Y);
-    end
-    else
-    begin
-      if points[z].position.X=0 then
-        points[z].c1 := Point(-1,1)
-      else
-        points[z].c1 := Point(points[z].position.X-1,(points[z].position.Y-1) div 2);
-      if points[z].position.X=aSize.X then
-        points[z].c2 := Point(-1,0)
-      else
-        points[z].c2 := Point(points[z].position.X, points[z].position.Y div 2);
+      begin
+        if position.X=0 then
+          c1 := Point(-1,1)
+        else
+          c1 := Point(position.X-1,(position.Y-1) div 2);
+        if position.X=aSize.X then
+          c2 := Point(-1,0)
+        else
+          c2 := Point(position.X, position.Y div 2);
+      end;
     end;
-end;
 
-procedure TRoutaBoard.InitSize(size: TPoint);
-var
-  x: integer;
-begin
-  cOffst := Point(0,0);
-  aSize := size;
-  SetLength(cells,aSize.X);
-  for x := 0 to aSize.X-1 do
-    SetLength(cells[x],aSize.Y);
+  if DoubleSide then
+  begin
+    for x := 0 to 1 do
+      for z := 0 to HIGH(hTracks) do
+        hTracks[z].connected[x] := false;
+
+    for z := 0 to High(points[false]) do
+      with points[false][z] do
+      begin
+        if is_row then
+        begin
+          c1 := position;
+          c2 := c1;
+        end
+        else
+        begin
+          hTracks[position.Y].connected[zpos] := true;
+          if zpos = 0 then
+          begin
+            c1 := point(-1,3);
+            c2 := c1;
+          end
+          else
+          begin
+            c1 := point(-1,4);
+            c2 := c1;
+          end;
+        end;
+      end;
+  end;
 end;
 
 function TRoutaBoard.FindJumperWire;
@@ -673,20 +785,31 @@ begin
   Result := -1;
 end;
 
-constructor TRoutaBoard.Create(size: TPoint);
+procedure TRoutaBoard.InitSize;
+var
+  x: integer;
+begin
+  CurrentLayer := true;
+  DoubleSide := isDouble;
+  cOffst := Point(0,0);
+  aSize := size;
+  SetLength(cells,aSize.X);
+  for x := 0 to aSize.X-1 do
+    SetLength(cells[x],aSize.Y);
+  SetLength(hTracks,aSize.Y);
+end;
+
+constructor TRoutaBoard.Create;
 var
   x: integer;
 begin
   inherited Create;
+  InitSize(size,isDouble);
   LoadDefaultColorScheme;
   cZoom := 1;
-  cOffst := Point(0,0);
-  aSize := size;
-  SetLength(points,0);
+  SetLength(points[true],0);
+  SetLength(points[false],0);
   SetLength(components,0);
-  SetLength(cells,aSize.X);
-  for x := 0 to aSize.X-1 do
-    SetLength(cells[x],aSize.Y);
 end;
 
 procedure TRoutaBoard.DrawLegend;
@@ -697,24 +820,24 @@ var
   d: double;
   s: string;
 begin
-  pb.Buffer.Font.Size := Round(40 * zoom);
+  Buffer.Font.Size := Round(40 * zoom);
   for z := 1 to aSize.Y do
   begin
     s := FormatFloat('00',aSize.Y-z+1);
-    d := pb.Buffer.TextHeight(s) / 2;// * zoom;
+    d := Buffer.TextHeight(s) / 2;// * zoom;
     pt := Point(Round(offst.X+(cOffsX-cRBcellSize+cRBpadWidth)*zoom), offst.Y+Round((cOffsY+ z * cRBcellSize) * zoom - d));
-    pb.Buffer.RenderText(pt.X,pt.Y,s,1,cs.mycolorLegendText);
+    Buffer.RenderText(pt.X,pt.Y,s,1,cs.mycolorLegendText);
   end;
   for z := 1 to aSize.X do
   begin
-    s := IntToRef(z);
-    d := pb.Buffer.TextWidth(s) / 2;// * zoom;
+    s := IntToRef(z,CurrentLayer);
+    d := Buffer.TextWidth(s) / 2;// * zoom;
     Pt := Point(Round(offst.X-d+(cOffsX+z*cRBcellSize)*zoom),Round(offst.Y+(cRBcellSize*(aSize.Y+2)+cOffsY-cRBcellSize+cRBpadWidth)*zoom));
-    pb.Buffer.RenderText(pt.X,pt.y,s,1,cs.mycolorLegendText);
+    Buffer.RenderText(pt.X,pt.y,s,1,cs.mycolorLegendText);
   end;
 end;
 
-procedure TRoutaBoard.DrawSideTrack;
+procedure TRoutaBoard.DrawBus;
 var
   clr: TColor32;
   pt,pt2: TPoint;
@@ -725,23 +848,43 @@ begin
   else
     clr := cs.mycolorBoard;
   case track of
+  4:
+    for z := 0 to aSize.Y-1 do
+    begin
+      pt := GetCellCoords(Point(-1,z), zoom, offst);
+      pt.Y := Round(pt.Y + (cRBcellQuarter+1.5*cRBpadHeight)*zoom);
+      Buffer.FillRectS(Round(pt.X-cRBsideTrack*zoom),Round(pt.Y-cRBcellHalf*zoom),Round(pt.X+cRBsideTrack*zoom),Round(pt.Y+cRBcellHalf*zoom),clr);
+      Buffer.FillRectS(pt.X,Round(pt.Y-cRBpadHeight*zoom),Round(pt.X+cRBcellQuarter*zoom),Round(pt.Y+cRBpadHeight*zoom),clr);
+      pt2 := Point(Round(pt.X + (cRBcellQuarter+cRBpadHeight)*zoom),pt.Y);
+      Buffer.FillRectS(Round(pt2.X-cRBpadHeight*zoom),Round(pt2.Y-cRBpadHeight*zoom),Round(pt2.X+cRBpadHeight*zoom),Round(pt2.Y+cRBpadHeight*zoom),clr);
+    end;
+  3:
+    for z := 0 to aSize.Y-1 do
+    begin
+      pt := GetCellCoords(Point(aSize.X,z), zoom, offst);
+      pt.Y := Round(pt.Y - (cRBcellQuarter+1.5*cRBpadHeight)*zoom);
+      Buffer.FillRectS(Round(pt.X-cRBsideTrack*zoom),Round(pt.Y-cRBcellHalf*zoom),Round(pt.X+cRBsideTrack*zoom),Round(pt.Y+cRBcellHalf*zoom),clr);
+      Buffer.FillRectS(Round(pt.X-cRBcellQuarter*zoom),Round(pt.Y-cRBpadHeight*zoom),pt.X,Round(pt.Y+cRBpadHeight*zoom),clr);
+      pt2 := Point(Round(pt.X - (cRBcellQuarter+2*cRBpadHeight)*zoom),pt.Y);
+      Buffer.FillRectS(Round(pt2.X),Round(pt2.Y-cRBpadHeight*zoom),Round(pt2.X+2*cRBpadHeight*zoom),Round(pt2.Y+cRBpadHeight*zoom),clr);
+    end;
   1:
     for z := 0 to aSize.Y-1 do
     begin
       pt := GetCellCoords(Point(-1,z), zoom, offst);
-      pb.Buffer.FillRectS(Round(pt.X-cRBsideTrack*zoom),Round(pt.Y-cRBcellHalf*zoom),Round(pt.X+cRBsideTrack*zoom),Round(pt.Y+cRBcellHalf*zoom),clr);
-      pb.Buffer.FillRectS(pt.X,Round(pt.Y-cRBpadHeight*zoom),Round(pt.X+cRBcellHalf*zoom),Round(pt.Y+cRBpadHeight*zoom),clr);
+      Buffer.FillRectS(Round(pt.X-cRBsideTrack*zoom),Round(pt.Y-cRBcellHalf*zoom),Round(pt.X+cRBsideTrack*zoom),Round(pt.Y+cRBcellHalf*zoom),clr);
+      Buffer.FillRectS(pt.X,Round(pt.Y-cRBpadHeight*zoom),Round(pt.X+cRBcellHalf*zoom),Round(pt.Y+cRBpadHeight*zoom),clr);
       pt2 := Point(Round(pt.X + cRBcellHalf*zoom),pt.Y);
-      pb.Buffer.FillRectS(Round(pt2.X-cRBpadHeight*zoom),Round(pt2.Y-cRBpadWidth*zoom),Round(pt2.X+cRBpadHeight*zoom),Round(pt2.Y+cRBpadWidth*zoom),clr);
+      Buffer.FillRectS(Round(pt2.X-cRBpadHeight*zoom),Round(pt2.Y-cRBpadWidth*zoom),Round(pt2.X+cRBpadHeight*zoom),Round(pt2.Y+cRBpadWidth*zoom),clr);
     end;
   2:
     for z := 0 to aSize.X-1 do
     begin
       pt := GetCellCoords(Point(z,-1), zoom, offst);
-      pb.Buffer.FillRectS(Round(pt.X-cRBcellHalf*zoom),Round(pt.Y-cRBsideTrack*zoom),Round(pt.X+cRBcellHalf*zoom),Round(pt.Y+cRBsideTrack*zoom),clr);
-      pb.Buffer.FillRectS(Round(pt.X-cRBpadHeight*zoom),pt.Y,Round(pt.X+cRBpadHeight*zoom),Round(pt.Y+cRBcellHalf*zoom),clr);
+      Buffer.FillRectS(Round(pt.X-cRBcellHalf*zoom),Round(pt.Y-cRBsideTrack*zoom),Round(pt.X+cRBcellHalf*zoom),Round(pt.Y+cRBsideTrack*zoom),clr);
+      Buffer.FillRectS(Round(pt.X-cRBpadHeight*zoom),pt.Y,Round(pt.X+cRBpadHeight*zoom),Round(pt.Y+cRBcellHalf*zoom),clr);
       pt2 := Point(pt.X,Round(pt.Y+cRBcellHalf*zoom));
-      pb.Buffer.FillRectS(Round(pt2.X-cRBpadWidth*zoom),Round(pt2.Y-cRBpadHeight*zoom),Round(pt2.X+cRBpadWidth*zoom),Round(pt2.Y+cRBpadHeight*zoom),clr);
+      Buffer.FillRectS(Round(pt2.X-cRBpadWidth*zoom),Round(pt2.Y-cRBpadHeight*zoom),Round(pt2.X+cRBpadWidth*zoom),Round(pt2.Y+cRBpadHeight*zoom),clr);
     end;
   0:
     begin
@@ -749,22 +892,73 @@ begin
       begin
         pt := GetCellCoords(Point(aSize.X,z), zoom, offst);
         pt.Y := Round(pt.Y + cRBcellHalf*zoom);
-        pb.Buffer.FillRectS(Round(pt.X-cRBsideTrack*zoom),Round(pt.Y-cRBcellHalf*zoom),Round(pt.X+cRBsideTrack*zoom),Round(pt.Y+cRBcellHalf*zoom),clr);
-        pb.Buffer.FillRectS(Round(pt.X-cRBcellHalf*zoom),Round(pt.Y-cRBpadHeight*zoom),pt.X,Round(pt.Y+cRBpadHeight*zoom),clr);
+        Buffer.FillRectS(Round(pt.X-cRBsideTrack*zoom),Round(pt.Y-cRBcellHalf*zoom),Round(pt.X+cRBsideTrack*zoom),Round(pt.Y+cRBcellHalf*zoom),clr);
+        Buffer.FillRectS(Round(pt.X-cRBcellHalf*zoom),Round(pt.Y-cRBpadHeight*zoom),pt.X,Round(pt.Y+cRBpadHeight*zoom),clr);
         pt2 := Point(Round(pt.X - cRBcellHalf*zoom),pt.Y);
-        pb.Buffer.FillRectS(Round(pt2.X-cRBpadHeight*zoom),Round(pt2.Y-cRBpadWidth*zoom),Round(pt2.X+cRBpadHeight*zoom),Round(pt2.Y+cRBpadWidth*zoom),clr);
+        Buffer.FillRectS(Round(pt2.X-cRBpadHeight*zoom),Round(pt2.Y-cRBpadWidth*zoom),Round(pt2.X+cRBpadHeight*zoom),Round(pt2.Y+cRBpadWidth*zoom),clr);
       end;
 
       for z := 0 to aSize.X do
       begin
         pt := GetCellCoords(Point(z,aSize.Y), zoom, offst);
         pt.X := Round(pt.X - cRBcellHalf*zoom);
-        pb.Buffer.FillRectS(Round(pt.X-cRBcellHalf*zoom),Round(pt.Y-cRBsideTrack*zoom),Round(pt.X+cRBcellHalf*zoom),Round(pt.Y+cRBsideTrack*zoom),clr);
-        pb.Buffer.FillRectS(Round(pt.X-cRBpadHeight*zoom),Round(pt.Y-cRBcellHalf*zoom),Round(pt.X+cRBpadHeight*zoom),pt.Y,clr);
+        buffer.FillRectS(Round(pt.X-cRBcellHalf*zoom),Round(pt.Y-cRBsideTrack*zoom),Round(pt.X+cRBcellHalf*zoom),Round(pt.Y+cRBsideTrack*zoom),clr);
+        buffer.FillRectS(Round(pt.X-cRBpadHeight*zoom),Round(pt.Y-cRBcellHalf*zoom),Round(pt.X+cRBpadHeight*zoom),pt.Y,clr);
         pt2 := Point(pt.X,Round(pt.Y-cRBcellHalf*zoom));
-        pb.Buffer.FillRectS(Round(pt2.X-cRBpadWidth*zoom),Round(pt2.Y-cRBpadHeight*zoom),Round(pt2.X+cRBpadWidth*zoom),Round(pt2.Y+cRBpadHeight*zoom),clr);
+        buffer.FillRectS(Round(pt2.X-cRBpadWidth*zoom),Round(pt2.Y-cRBpadHeight*zoom),Round(pt2.X+cRBpadWidth*zoom),Round(pt2.Y+cRBpadHeight*zoom),clr);
       end;
     end;
+  end;
+end;
+
+procedure TRoutaBoard.DrawHTrack;
+var
+  ptA,ptB,pt1,pt2: TPoint;
+  ptZ: TPoint;
+  clr: TColor32;
+  z: integer;
+begin
+  ptA := GetCellCoords(Point(0,track), zoom, offst);
+  ptB := GetCellCoords(Point(aSize.X-1,track), zoom, offst);
+
+  pt1.X := Round(ptA.X - cRBcellQuarter*zoom);
+  pt2.X := Round(ptB.X + cRBcellHalf*zoom);
+  pt1.Y := Round(ptA.Y-(cRBpadHeight+cRBcellQuarter+cRBpadHeight)*zoom);
+  if hTracks[track].highlight[0] then
+    clr := cs.mycolorBrdHigh
+  else
+    clr := cs.mycolorBoard;
+  buffer.FillRectS(pt1.X,pt1.Y,pt2.X,Round(pt1.Y+cRBpadHeight*zoom),clr);
+  pt1.Y := Round(pt1.Y + cRBpadHeight*zoom/2);
+  pt1.X := Round(pt2.X - cRBpadHeight*zoom);
+  buffer.FillRectS(Round(pt1.X-cRBpadHeight*zoom),Round(pt1.Y-cRBpadHeight*zoom),
+                   Round(pt1.X+cRBpadHeight*zoom),Round(pt1.Y+cRBpadHeight*zoom),clr);
+  for z := 0 to aSize.X-1 do
+  begin
+    ptZ := GetCellCoords(Point(z,track), zoom, offst);
+    ptZ.X := Round(ptZ.X + cRBdiaIn*zoom);
+    ptZ.Y := pt1.Y;
+    buffer.FillRectS(Round(ptZ.X-cRBpadHeight*zoom),Round(ptZ.Y-cRBpadHeight*zoom),Round(ptZ.X+cRBpadHeight*zoom),Round(ptZ.Y+cRBpadHeight*zoom),clr);
+  end;
+
+  pt1.X := Round(ptA.X - cRBcellHalf*zoom);
+  pt2.X := Round(ptB.X + cRBcellQuarter*zoom);
+  pt1.Y := Round(ptA.Y+(cRBpadHeight+cRBcellQuarter)*zoom);
+  if hTracks[track].highlight[1] then
+    clr := cs.mycolorBrdHigh
+  else
+    clr := cs.mycolorBoard;
+  buffer.FillRectS(pt1.X,pt1.Y,pt2.X,Round(pt1.Y+cRBpadHeight*zoom),clr);
+  pt1.Y := Round(pt1.Y + cRBpadHeight*zoom/2);
+  pt1.X := Round(pt1.X + cRBpadHeight*zoom);
+  buffer.FillRectS(Round(pt1.X-cRBpadHeight*zoom),Round(pt1.Y-cRBpadHeight*zoom),
+                   Round(pt1.X+cRBpadHeight*zoom),Round(pt1.Y+cRBpadHeight*zoom),clr);
+  for z := 0 to aSize.X-1 do
+  begin
+    ptZ := GetCellCoords(Point(z,track), zoom, offst);
+    ptZ.X := Round(ptZ.X - cRBdiaIn*zoom);
+    ptZ.Y := pt1.Y;
+    buffer.FillRectS(Round(ptZ.X-cRBpadHeight*zoom),Round(ptZ.Y-cRBpadHeight*zoom),Round(ptZ.X+cRBpadHeight*zoom),Round(ptZ.Y+cRBpadHeight*zoom),clr);
   end;
 end;
 
@@ -788,39 +982,51 @@ begin
     clr := cs.mycolorBoard;
     clr2 := cs.mycolorBrdCircle;
   end;
-  pt := GetCellCoords(cell, zoom, offst);
+  pt := GetCellCoords(cell, zoom, offst, not CurrentLayer);
 
-  pt2 := Point(Round(pt.X - cRBcellHalf * zoom), Round(pt.Y - cRBcellHalf * zoom));
   xx := Round(cRBpadWidth*zoom);
   yy := Round(cRBpadHeight*zoom);
-  SetLength(afp,5);
-  afp[0] := FixedPoint(pt2.X-cRBtrackDia*zoom,pt2.Y);
-  afp[1] := FixedPoint(pt2.X+cRBtrackDia*zoom,pt2.Y);
-  afp[2] := FixedPoint(pt.X+cRBtrackDia*zoom,pt.Y);
-  afp[3] := FixedPoint(pt.X-cRBtrackDia*zoom,pt.Y);
-  afp[4] := afp[0];
-  PolygonXS(pb.Buffer,afp,clr);
-  pb.Buffer.FillRectS(pt2.X-xx,pt2.Y-yy,pt2.X+xx,pt2.Y+yy,clr);
-  pb.Buffer.FillRectS(pt2.X-yy,pt2.Y-xx,pt2.X+yy,pt2.Y+xx,clr);
 
-  pt2 := Point(Round(pt.X + cRBcellHalf * zoom), pt.Y);
-  pb.Buffer.FillRectS(pt.X,Round(pt.Y-cRBtrack*zoom),pt2.X,Round(pt2.Y+cRBtrack*zoom),clr);
-  pb.Buffer.FillRectS(pt2.X-yy,pt2.Y-xx,pt2.X+yy,pt2.Y+xx,clr);
+  if CurrentLayer then
+  begin
+    pt2 := Point(Round(pt.X - cRBcellHalf * zoom), Round(pt.Y - cRBcellHalf * zoom));
+    SetLength(afp,5);
+    afp[0] := FixedPoint(pt2.X-cRBtrackDia*zoom,pt2.Y);
+    afp[1] := FixedPoint(pt2.X+cRBtrackDia*zoom,pt2.Y);
+    afp[2] := FixedPoint(pt.X+cRBtrackDia*zoom,pt.Y);
+    afp[3] := FixedPoint(pt.X-cRBtrackDia*zoom,pt.Y);
+    afp[4] := afp[0];
+    PolygonXS(buffer,afp,clr);
+    buffer.FillRectS(pt2.X-xx,pt2.Y-yy,pt2.X+xx,pt2.Y+yy,clr);
+    buffer.FillRectS(pt2.X-yy,pt2.Y-xx,pt2.X+yy,pt2.Y+xx,clr);
 
-  pt2 := Point(pt.X, Round(pt.Y + cRBcellHalf * zoom));
-  pb.Buffer.FillRectS(Round(pt.X-cRBtrack*zoom),pt.Y,Round(pt2.X+cRBtrack*zoom),pt2.Y,clr);
-  pb.Buffer.FillRectS(pt2.X-xx,pt2.Y-yy,pt2.X+xx,pt2.Y+yy,clr);
+    pt2 := Point(Round(pt.X + cRBcellHalf * zoom), pt.Y);
+    buffer.FillRectS(pt.X,Round(pt.Y-cRBtrack*zoom),pt2.X,Round(pt2.Y+cRBtrack*zoom),clr);
+    buffer.FillRectS(pt2.X-yy,pt2.Y-xx,pt2.X+yy,pt2.Y+xx,clr);
+
+    pt2 := Point(pt.X, Round(pt.Y + cRBcellHalf * zoom));
+    buffer.FillRectS(Round(pt.X-cRBtrack*zoom),pt.Y,Round(pt2.X+cRBtrack*zoom),pt2.Y,clr);
+    buffer.FillRectS(pt2.X-xx,pt2.Y-yy,pt2.X+xx,pt2.Y+yy,clr);
+  end
+  else
+  begin
+    pt2 := Point(Round(pt.X + cRBdiaIn * zoom), Round(pt.Y - cRBdiaIn * zoom));
+    buffer.FillRectS(pt2.X-yy,pt2.Y-yy,pt2.X+yy,pt2.Y+yy,clr);
+    pt2 := Point(Round(pt.X - cRBdiaIn * zoom), Round(pt.Y + cRBdiaIn * zoom));
+    buffer.FillRectS(pt2.X-yy,pt2.Y-yy,pt2.X+yy,pt2.Y+yy,clr);
+  end;
 
   try
     rr := G32_Interface.FixedRect(Fixed(pt.X-cRBdiaOut*zoom),Fixed(pt.Y - cRBdiaOut*zoom),Fixed(pt.X + cRBdiaOut*zoom),Fixed(pt.Y + cRBdiaOut*zoom));
-    gEllipse(pb.Buffer,rr,clr2,pdoAntialising or pdoFilling);
+    gEllipse(buffer,rr,clr2,pdoAntialising or pdoFilling);
   except
   end;
   try
     rr := G32_Interface.FixedRect(Fixed(pt.X-cRBdiaIn*zoom),Fixed(pt.Y - cRBdiaIn*zoom),Fixed(pt.X + cRBdiaIn*zoom),Fixed(pt.Y + cRBdiaIn*zoom));
-    gEllipse(pb.Buffer,rr,cs.mycolorBackground,pdoAntialising or pdoFilling);
+    gEllipse(buffer,rr,cs.mycolorBackground,pdoAntialising or pdoFilling);
   except
   end;
+
 end;
 
 procedure TRoutaBoard.DrawConns;
@@ -832,12 +1038,13 @@ var
 begin
   clr := Color32(255,0,0,200); //clTrRed32;
 
-  for z := 0 to HIGH(points) do
+  for z := 0 to HIGH(points[CurrentLayer]) do
   begin
-    fp := GetConnCoord(points[z].position,points[z].is_row,zoom,offst);
+    with points[CurrentLayer][z] do
+      fp := GetConnCoord(position,is_row,zoom,offst,zpos);
     rr := G32_Interface.FixedRect(Fixed(fp.x-cRBpoint*zoom),Fixed(fp.y-cRBpoint*zoom),Fixed(fp.x+cRBpoint*zoom),Fixed(fp.y+cRBpoint*zoom));
     try
-      gEllipse(pb.Buffer,rr,clr,pdoAntialising or pdoFastFilling);
+      gEllipse(buffer,rr,clr,pdoAntialising or pdoFastFilling);
     except
     end;
   end;
@@ -857,20 +1064,20 @@ begin
     else
       clr := $FF000000 or $f2be0d;
 
-    body.TopLeft := GetCellCoords(r.TopLeft, zoom, offst);
-    body.BottomRight := GetCellCoords(r.BottomRight, zoom, offst);
+    body.TopLeft := GetCellCoords(r.TopLeft, zoom, offst, not CurrentLayer);
+    body.BottomRight := GetCellCoords(r.BottomRight, zoom, offst, not CurrentLayer);
     SetLength(afp,2);
     afp[0] := FixedPoint(body.Left,body.Top);
     afp[1] := FixedPoint(body.Right,body.Bottom);
-    SimpleLine(pb.Buffer,afp,clr,zoom * 10);
+    SimpleLine(buffer,afp,clr,zoom * 10);
     try
-      rr := G32_Interface.FixedRect(Fixed(Body.Left-cRBdiaOut*zoom),Fixed(Body.Top - cRBdiaOut*zoom),Fixed(body.Left + cRBdiaOut*zoom),Fixed(body.Top + cRBdiaOut*zoom));
-      gEllipse(pb.Buffer,rr,clr,pdoAntialising or pdoFilling);
+      rr := G32_Interface.FixedRect(Fixed(Body.Left-cRBdiaOutJW*zoom),Fixed(Body.Top - cRBdiaOutJW*zoom),Fixed(body.Left + cRBdiaOutJW*zoom),Fixed(body.Top + cRBdiaOutJW*zoom));
+      gEllipse(buffer,rr,clr,pdoAntialising or pdoFilling);
     except
     end;
     try
-      rr := G32_Interface.FixedRect(Fixed(Body.Right-cRBdiaOut*zoom),Fixed(Body.Bottom - cRBdiaOut*zoom),Fixed(body.Right + cRBdiaOut*zoom),Fixed(body.Bottom + cRBdiaOut*zoom));
-      gEllipse(pb.Buffer,rr,clr,pdoAntialising or pdoFilling);
+      rr := G32_Interface.FixedRect(Fixed(Body.Right-cRBdiaOutJW*zoom),Fixed(Body.Bottom - cRBdiaOutJW*zoom),Fixed(body.Right + cRBdiaOutJW*zoom),Fixed(body.Bottom + cRBdiaOutJW*zoom));
+      gEllipse(buffer,rr,clr,pdoAntialising or pdoFilling);
     except
     end;
   end;
@@ -887,53 +1094,71 @@ var
   z: integer;
   ts: tagSIZE;
   body,xbody: TRect;
+  chigh: boolean;
 begin
   with component1 do
   begin
-    body.TopLeft := GetCellCoords(point(position.X, position.Y), zoom, offst);
-    body.BottomRight := GetCellCoords(point(position.X + aSize.X, position.Y + aSize.Y), zoom, offst);
+    body.TopLeft := GetCellCoords(point(position.X, position.Y), zoom, offst, not CurrentLayer);
+    body.BottomRight := GetCellCoords(point(position.X + aSize.X, position.Y + aSize.Y), zoom, offst, not CurrentLayer);
+    xNormalizeRect(body);
     xbody := Rect(Round(body.Left-cRBcellHalfMinus*zoom),Round(body.Top-cRBcellHalfMinus * zoom),Round(body.Right+cRBcellHalfMinus * zoom),Round(body.Bottom+cRBcellHalfMinus * zoom));
-    pb.FillRectTS(xbody.Left,xbody.Top,xbody.Right,xbody.Bottom,clr);
-    pb.FrameRectS(xbody.Left,xbody.Top,xbody.Right,xbody.Bottom,clr);
-    pb.Font.Size := Round(15 * zoom);
-    pb.Font.Style := [];
+    buffer.FillRectTS(xbody.Left,xbody.Top,xbody.Right,xbody.Bottom,clr);
+    buffer.FrameRectS(xbody.Left,xbody.Top,xbody.Right,xbody.Bottom,clr);
+    buffer.Font.Size := Round(15 * zoom);
+    buffer.Font.Style := [];
 
-    pb.RenderText(Round(xbody.Left+4*zoom), Round(xbody.Top+2*zoom), id, 1, clWhite32);
+    buffer.RenderText(Round(xbody.Left+4*zoom), Round(xbody.Top+2*zoom), id, 1, clWhite32);
 
-    pb.Font.Size := Round(20 * zoom);
-    pb.Font.Style := [];
+    buffer.Font.Size := Round(20 * zoom);
+    buffer.Font.Style := [];
     for z := 0 to HIGH(pins) do
     begin
-      pt := GetCellCoords(point(position.X + pins[z].pos.X,position.Y + pins[z].pos.Y), zoom, offst);
+      pt := GetCellCoords(point(position.X + pins[z].pos.X,position.Y + pins[z].pos.Y), zoom, offst, not CurrentLayer);
       try
         rr := G32_Interface.FixedRect(Fixed(pt.X-cRBdiaOut*zoom),Fixed(pt.Y - cRBdiaOut*zoom),Fixed(pt.X + cRBdiaOut*zoom),Fixed(pt.Y + cRBdiaOut*zoom));
-        if z = hipin then
+
+        chigh := z = hipin;
+
+        if cells[position.X + pins[z].pos.X,position.Y + pins[z].pos.Y].highlight then
+          chigh := true;
+
+        if chigh then
           clr2 := TColor32($FFffCC99)
         else
           clr2 := TColor32($FFff6600);
-        gEllipse(pb,rr,clr2,pdoAntialising or pdoFilling);
+
+        gEllipse(buffer,rr,clr2,pdoAntialising or pdoFilling);
       except
       end;
-      ts := pb.TextExtent(pins[z].name);
-      pb.RenderText(pt.X - ts.cx div 2,pt.Y - ts.cy div 2,pins[z].name,1,clWhite32);
+      ts := buffer.TextExtent(pins[z].name);
+
+        if chigh then
+          clr2 := clBlack32
+        else
+          clr2 := clWhite32;
+
+      buffer.RenderText(pt.X - ts.cx div 2,pt.Y - ts.cy div 2,pins[z].name,1,clr2);
     end;
   end;
 end;
 
 function TRoutaBoard.GetCellCoords;
 begin
+//  mirror := not CurrentLayer;
+  if mirror then
+    cell.X := aSize.X - cell.X - 1;
   result.X := offst.X + Round((cOffsX + (cell.X+1) * cRBcellSize) * zoom);
   result.Y := offst.Y + Round((cOffsY + (cell.Y+1) * cRBcellSize) * zoom);
 end;
 
 function TRoutaBoard.GetCoordsCell;
 begin
-  if coord.X < cOffsX-(cRBcellSize-cRBcellQuater)*cZoom then
+  if coord.X < cOffsX-(cRBcellSize-cRBcellQuarter)*cZoom then
     result.X := -1
   else
     result.X := Trunc(0.5+((coord.X - cOffst.X)/cZoom - cOffsX - cRBcellSize) / cRBcellSize);
 
-  if coord.Y < cOffsY+(cRBcellQuater)*cZoom then
+  if coord.Y < cOffsY+(cRBcellQuarter)*cZoom then
     result.Y := -1
   else
     result.Y := Trunc(0.5+((coord.Y - cOffst.Y)/cZoom - cOffsY - cRBcellSize) / cRBcellSize);
@@ -941,17 +1166,30 @@ end;
 
 function TRoutaBoard.PointToBus;
 begin
-  if (coord.X < 0) and (coord.Y >= 0) then
-    result := 1
-  else
-    if (coord.X >= 0) and (coord.Y < 0) then
-      result := 2
+  if CurrentLayer then
+  begin
+    if (coord.X < 0) and (coord.Y >= 0) then
+      result := 1
     else
-      if ((coord.X >= aSize.X) and (coord.Y >= 0)) or
-         ((coord.Y >= aSize.Y) and (coord.X >= 0)) then
-        result := 0
+      if (coord.X >= 0) and (coord.Y < 0) then
+        result := 2
+      else
+        if ((coord.X >= aSize.X) and (coord.Y >= 0)) or
+           ((coord.Y >= aSize.Y) and (coord.X >= 0)) then
+          result := 0
+        else
+          result := -1;
+  end
+  else
+  begin
+    if (coord.X < 0) and (coord.Y >= 0) then
+      result := 4
+    else
+      if ((coord.X >= aSize.X) and (coord.Y >= 0)) then
+        result := 3
       else
         result := -1;
+  end;
 end;
 
 function TRoutaBoard.GetVisibleCells;
@@ -960,19 +1198,45 @@ var
 begin
   r.TopLeft := SubtractPoints(GetCoordsCell(coord.TopLeft),Point(0,0));
   r.BottomRight := AddPoints(GetCoordsCell(coord.BottomRight),Point(1,1));
+  if not CurrentLayer then
+  begin
+    R.Left := aSize.X - R.Left;
+    R.Right := aSize.X - R.Right;
+  end;
+  xNormalizeRect(r);
   if r.Left < 0 then r.Left := 0;
   if r.Right > aSize.X-1 then r.Right := aSize.X - 1;
   if r.Top < 0 then r.Top := 0;
   if r.Bottom > aSize.Y-1 then r.Bottom := aSize.Y - 1;
+
   result := r;
 end;
 
 function TRoutaBoard.GetConnCoord;
 begin
-  if is_row then
-    result := FloatPoint((cOffsX+cRBcellQuater+cRBcellHalf*pos.x)*Zoom+Offst.X,(cOffsY+cRBcellHalf+cRBcellSize*pos.y)*Zoom+Offst.Y)
+  if CurrentLayer then  // top layer
+  begin
+    if is_row then
+      result := FloatPoint((cOffsX+cRBcellQuarter+cRBcellHalf*pos.x)*Zoom+Offst.X,(cOffsY+cRBcellHalf+cRBcellSize*pos.y)*Zoom+Offst.Y)
+    else
+      result := FloatPoint((cOffsX+cRBcellHalf+cRBcellSize*pos.x)*Zoom+Offst.X,(cOffsY+cRBcellQuarter+cRBcellHalf*pos.y)*Zoom+Offst.Y);
+  end
   else
-    result := FloatPoint((cOffsX+cRBcellHalf+cRBcellSize*pos.x)*Zoom+Offst.X,(cOffsY+cRBcellQuater+cRBcellHalf*pos.y)*Zoom+Offst.Y);
+  begin
+    pos.X := aSize.X - pos.X - 1;
+    if is_row then  // bottom hTrack
+    begin
+      if zpos = 0 then // upper hTrack
+        result := FloatPoint((cOffsX+cRBdiaIn+cRBcellSize*(pos.x+1))*Zoom+Offst.X,(cOffsY-cRBdiaIn-cRBpoint+cRBcellSize*(pos.y+1))*Zoom+Offst.Y)
+      else              // lower hTrack
+        result := FloatPoint((cOffsX-cRBdiaIn+cRBcellSize*(pos.x+1))*Zoom+Offst.X,(cOffsY+cRBdiaIn+cRBpoint+cRBcellSize*(pos.y+1))*Zoom+Offst.Y);
+    end
+    else          // botton hTrack connection
+      if zpos = 0 then // right connection
+        result := FloatPoint((cOffsX+cRBcellHalfPlus+aSize.X*cRBcellSize)*Zoom+Offst.X,(cOffsY-cRBcellQuarter-cRBpoint+cRBcellSize*(pos.y+1))*Zoom+Offst.Y)
+      else              // left connections
+        result := FloatPoint((cOffsX+cRBcellHalfMinus)*Zoom+Offst.X,(cOffsY+cRBcellQuarter+cRBpoint+cRBcellSize*(pos.y+1))*Zoom+Offst.Y)
+  end;
 end;
 
 function TRoutaBoard.FindCellPoint;
@@ -984,7 +1248,7 @@ begin
   for x := 0 to aSize.X-1 do
     for y := 0 to aSize.Y-1 do
     begin
-      p := GetCellCoords(Point(x,y),cZoom,cOffst);
+      p := GetCellCoords(Point(x,y),cZoom,cOffst,not CurrentLayer);
       r := FloatRect(p.X-((cRBcellHalf-5)*cZoom),p.Y-((cRBcellHalf-5)*cZoom),p.X+((cRBcellHalf-5)*cZoom),p.Y+((cRBcellHalf-5)*cZoom));
       if PtInRect(r,coord) then
       begin
@@ -1034,39 +1298,81 @@ end;
 function TRoutaBoard.FindConnPoint(coord: TPoint; var cp: TRBconnPoint): boolean;
 var
   R: TFloatRect;
-  fp: TFloatPoint;
   P: TPoint;
-  x,y: integer;
+  x,y,z: integer;
+
+function GetFRofPoint(const fp: TFloatPoint): TFloatRect;
 begin
-  P := cOffst;
-  for y := 0 to aSize.Y do
-    for x := 1 to aSize.X * 2 do
-    begin
-      fp := GetConnCoord(Point(x,y),true,cZoom,cOffst);
-      R := FloatRect(fp.X-cRBpoint*cZoom,fp.Y-cRBpoint*cZoom,fp.X+cRBpoint*cZoom,fp.Y+cRBpoint*cZoom);
-      if PtInRect(R,coord) then
+  result := FloatRect(fp.X-cRBpoint*cZoom,fp.Y-cRBpoint*cZoom,fp.X+cRBpoint*cZoom,fp.Y+cRBpoint*cZoom);
+end;
+
+begin
+  if CurrentLayer then
+  begin
+    P := cOffst;
+    for y := 0 to aSize.Y do
+      for x := 1 to aSize.X * 2 do
       begin
-        cp.position := Point(x,y);
-        cp.is_row := true;
-        cp.index := FindConnPointByPosition(cp.position,true);
-        result := true;
-        exit;
+        R := GetFRofPoint(GetConnCoord(Point(x,y),true,cZoom,cOffst,0));
+        if PtInRect(R,coord) then
+        begin
+          cp.position := Point(x,y);
+          cp.is_row := true;
+          cp.zpos := 0;
+          cp.index := FindConnPointByPosition(cp.position,true,0);
+          result := true;
+          exit;
+        end;
       end;
-    end;
-  for x := 0 to aSize.X do
-    for y := 1 to aSize.Y * 2 do
-    begin
-      fp := GetConnCoord(Point(x,y),false,cZoom,cOffst);
-      R := FloatRect(fp.X-cRBpoint*cZoom,fp.Y-cRBpoint*cZoom,fp.X+cRBpoint*cZoom,fp.Y+cRBpoint*cZoom);
-      if PtInRect(R,coord) then
+
+    for x := 0 to aSize.X do
+      for y := 1 to aSize.Y * 2 do
       begin
-        cp.position := Point(x,y);
-        cp.is_row := false;
-        cp.index := FindConnPointByPosition(cp.position,false);
-        result := true;
-        exit;
+        R := GetFRofPoint(GetConnCoord(Point(x,y),false,cZoom,cOffst,0));
+        if PtInRect(R,coord) then
+        begin
+          cp.position := Point(x,y);
+          cp.is_row := false;
+          cp.zpos := 0;
+          cp.index := FindConnPointByPosition(cp.position,false,0);
+          result := true;
+          exit;
+        end;
       end;
-    end;
+  end
+  else
+  begin
+    for z := 0 to 1 do
+      for y := 0 to aSize.Y-1 do  // hTracks
+        for x := 0 to aSize.X-1 do
+        begin
+          R := GetFRofPoint(GetConnCoord(Point(x,y),true,cZoom,cOffst,z));
+          if PtInRect(R,coord) then
+          begin
+            cp.position := Point(x,y);
+            cp.is_row := true;
+            cp.zpos := z;
+            cp.index := FindConnPointByPosition(cp.position,true,z);
+            result := true;
+            exit;
+          end;
+        end;
+
+    for z := 0 to 1 do  // hTrack side connections
+      for y := 0 to aSize.Y-1 do
+      begin
+        R := GetFRofPoint(GetConnCoord(Point(0,y),false,cZoom,cOffst,z));
+        if PtInRect(R,coord) then
+        begin
+          cp.position := Point(z,y);
+          cp.is_row := false;
+          cp.zpos := z;
+          cp.index := FindConnPointByPosition(cp.position,false,z);
+          result := true;
+          exit;
+        end;
+      end;
+  end;
   result := false;
 end;
 
@@ -1074,8 +1380,11 @@ function TRoutaBoard.FindConnPointByPosition;
 var
   z: integer;
 begin
-  for z := 0 to HIGH(points) do
-    if (points[z].position.X = coord.X) and (points[z].position.Y = coord.Y) and (points[z].is_row=aIs_row) then
+  for z := 0 to HIGH(points[CurrentLayer]) do
+    if (points[CurrentLayer][z].position.X = coord.X) and
+       (points[CurrentLayer][z].position.Y = coord.Y) and
+       (points[CurrentLayer][z].zpos = aZpos) and
+       (points[CurrentLayer][z].is_row=aIs_row) then
     begin
       result := z;
       exit;
@@ -1127,6 +1436,19 @@ end;
 procedure TRoutaBoard.AddConnPointByP1P2;
 var
   rbcon: TRBconnPoint;
+  CanAdd: boolean;
+
+function C1C2Match(p1,p2: TPoint; c1,c2: AnsiChar): boolean;
+begin
+  result := true;
+  if c1='A' then
+    if (c2='R') or (c2='D') then
+      exit;
+  if (c1='R') or (c1='D') then
+    if c2='A' then
+      exit;
+  result := false;
+end;
 
 function SetPoint(p1,p2: TPoint; c1: AnsiChar; bus: integer): boolean;
 begin
@@ -1167,31 +1489,67 @@ begin
 end;
 
 begin
-  if bus1>=0 then
+  CanAdd := true;
+  if CurrentLayer then
   begin
-    SetPoint(p2,p2,c2,bus1);
-    rbcon.c1 := p2;
-    rbcon.c2 := Point(-1,bus1);
-  end else
-  if bus2>=0 then
-  begin
-    SetPoint(p1,p1,c1,bus2);
-    rbcon.c1 := p1;
-    rbcon.c2 := Point(-1,bus2);
+    rbcon.zpos := 0;
+    if bus1>=0 then
+    begin
+      SetPoint(p2,p2,c2,bus1);
+      rbcon.c1 := p2;
+      rbcon.c2 := Point(-1,bus1);
+    end else
+    if bus2>=0 then
+    begin
+      SetPoint(p1,p1,c1,bus2);
+      rbcon.c1 := p1;
+      rbcon.c2 := Point(-1,bus2);
+    end
+    else
+    begin
+      rbcon.c1 := p1;
+      rbcon.c2 := p2;
+      if C1C2Match(p1,p2,c1,c2) then
+      begin
+        if SetPoint(p1,p2,c1,-1) then
+        begin
+          SetPoint(p2,p1,c2,-1);
+          rbcon.c1 := p2;
+          rbcon.c2 := p1;
+        end;
+      end
+      else
+      begin
+        ShowMessage('Error matching point '+cmd);
+        CanAdd := false;
+      end;
+    end;
   end
   else
   begin
-    rbcon.c1 := p1;
-    rbcon.c2 := p2;
-    if SetPoint(p1,p2,c1,-1) then
+    if (c1='U') or (c2='U') then
+      rbcon.zpos := 0
+    else rbcon.zpos := 1;
+
+    if (bus1>-1) and (bus2>-1) then
     begin
-      SetPoint(p2,p1,c2,-1);
-      rbcon.c1 := p2;
-      rbcon.c2 := p1;
+      rbcon.is_row := false;
+      if (p1.Y>=0) then
+        rbcon.position := Point(-1,p1.Y);
+      if (p2.Y>=0) then
+        rbcon.position := Point(-1,p2.Y);
+      rbcon.position.Y := aSize.Y - rbcon.position.Y;
+    end
+    else begin
+      rbcon.is_row := true;
+      if (p1.Y>=0) then
+        rbcon.position := p1;
+      if (p2.Y>=0) then
+        rbcon.position := p2;
     end;
   end;
-
-  AddConn(rbcon);
+  if CanAdd then
+    AddConn(rbcon,aLayer);
 end;
 
 function TRoutaBoard.RotateComponent;
@@ -1216,18 +1574,18 @@ end;
 
 function TRoutaBoard.AddConn;
 begin
-  SetLength(points,Length(points)+1);
-  points[HIGH(points)] := pnt;
+  SetLength(points[aLayer],Length(points[aLayer])+1);
+  points[aLayer][HIGH(points[aLayer])] := pnt;
   CheckConn;
-  result := HIGH(points);
+  result := HIGH(points[aLayer]);
 end;
 
-procedure TRoutaBoard.DeleteConn(idx: integer);
+procedure TRoutaBoard.DeleteConn;
 begin
-  if Length(points)>idx then
+  if Length(points[aLayer])>idx then
   begin
-    points[idx] := points[HIGH(points)];
-    SetLength(points,Length(points)-1);
+    points[aLayer][idx] := points[CurrentLayer][HIGH(points[aLayer])];
+    SetLength(points[aLayer],Length(points[aLayer])-1);
   end;
   CheckConn;
 end;
@@ -1277,14 +1635,23 @@ begin
     bus[x].highlight := false;
   for x := 0 to HIGH(jumperwires) do
     jumperwires[x].highlight := false;
+  for x := 0 to 1 do
+    for y := 0 to HIGH(hTracks) do
+      hTracks[y].highlight[x] := false;
 end;
 
 procedure TRoutaBoard.SetHighLight;
 begin
-  if pt.x<0 then
-    exit;
-//  cells[pt.X,pt.Y].highlight := true;
-  HighlightNet(pt);
+  if isbus then
+  begin
+    HighlightBus(pt.Y);
+  end
+  else
+  begin
+    if pt.x<0 then
+      exit;
+    HighlightNet(pt);
+  end;
 end;
 
 procedure TRoutaBoard.HighlightBus;
@@ -1296,8 +1663,9 @@ begin
   if bus[busNo].highlight then
     exit;
   bus[busNo].highlight := true;
-  for z := 0 to HIGH(points) do
-    with points[z] do
+
+  for z := 0 to HIGH(points[true]) do
+    with points[true][z] do
     begin
       if (c1.X<0) and (c1.Y=busNo) then
         HighlightNet(c2)
@@ -1305,6 +1673,34 @@ begin
        if (c2.X<0) and (c2.Y=busNo) then
           HighlightNet(c1)
     end;
+
+  if DoubleSide then
+  begin
+    for z := 0 to HIGH(points[false]) do
+      with points[false][z] do
+        if not is_row then
+          if (c1.X<0) and (c1.Y=busNo) then
+            HighlightHtrack(Point(zpos,position.Y));
+  end;
+end;
+
+procedure TRoutaBoard.HighlightHtrack;
+var
+  z: integer;
+begin
+  if (track.Y<0) or (track.Y>HIGH(hTracks)) then
+    exit;
+  if hTracks[track.Y].highlight[track.X] then
+    exit;
+
+  hTracks[track.Y].highlight[track.X] := true;
+  for z := 0 to HIGH(points[false]) do
+    with points[false][z] do
+      if (c1.Y=track.Y) and (zpos=track.X) then
+        HighlightNet(c1);
+
+  if hTracks[track.Y].connected[track.X] then
+    HighlightBus(3+track.X);
 end;
 
 procedure TRoutaBoard.HighlightNet;
@@ -1315,25 +1711,33 @@ begin
   if cells[pt.X,pt.Y].highlight then
     exit;
   cells[pt.X,pt.Y].highlight := true;
-  for z := 0 to HIGH(points) do
-    if PointsEqual(points[z].c1,pt) then
+  for z := 0 to HIGH(points[true]) do
+  begin
+    if PointsEqual(points[true][z].c1,pt) then
     begin
-      p2 := points[z].c2;
+      p2 := points[true][z].c2;
       if p2.X<0 then
         HighlightBus(p2.Y)
       else
         if not cells[p2.X,p2.Y].highlight then
           HighlightNet(p2);
     end else
-    if PointsEqual(points[z].c2,pt) then
+    if PointsEqual(points[true][z].c2,pt) then
     begin
-      p2 := points[z].c1;
+      p2 := points[true][z].c1;
       if p2.X<0 then
         HighlightBus(p2.Y)
       else
         if not cells[p2.X,p2.Y].highlight then
           HighlightNet(p2);
     end;
+  end;
+
+  if DoubleSide then
+    for z := 0 to HIGH(points[false]) do
+      with points[false][z] do
+        if PointsEqual(c1,pt) then
+          HighlightHtrack(Point(zpos,position.Y));
 
   z := FindJumperWireTo(pt,p2);
   if z>=0 then
@@ -1383,7 +1787,7 @@ begin
   Application.OnMessage := AppMessage;
   VisibleCells := Rect(0,0,0,0);
   main_zoom := 0.5;
-  RB := TRoutaBoard.Create(Point(24,32));
+  RB := TRoutaBoard.Create(Point(24,32),true);
   Application.HelpFile := ChangeFileExt(Application.ExeName,'.chm');
   Application.Title := 'RoutaEdit';
   Caption := Application.Title + ' v.'+FormattedCurrentVersion;
@@ -1394,6 +1798,7 @@ begin
   compPin.Bottom := -1;
   LoadBoardTypes;
   newJumperWire.TopLeft := Point(-1,-1);
+  btnBottom.Enabled := RB.DoubleSide;
   Application.ProcessMessages;
 end;
 
@@ -1431,7 +1836,7 @@ var
 begin
   lastPoint := Point(x,y);
   rbPoint := Point(x+scroll1.HorzScrollBar.Position, y+scroll1.VertScrollBar.Position);
-//  statusbar.Caption := IntToStr(rbPoint.X) + ':' + IntToStr(rbPoint.Y);
+
   if Button = mbRight then
   begin
     if editMode = emEdComponent then
@@ -1454,7 +1859,6 @@ begin
     end
     else
     begin
-
       dragPoint := AddPoints(Mouse.CursorPos,Point(scroll1.HorzScrollBar.Position,scroll1.VertScrollBar.Position));
       pb1.Cursor := crSizeAll;
       exit;
@@ -1502,19 +1906,23 @@ begin
         begin
           if rbcp.index>=0 then
           begin
-            RB.DeleteConn(rbcp.index);
+            RB.DeleteConn(rbcp.index,RB.CurrentLayer);
             RB.ClearHighLight;
             pb1.Repaint;
             filechanged := true;
           end
           else
           begin
-            i := RB.AddConn(rbcp);
+            i := RB.AddConn(rbcp,RB.CurrentLayer);
             RB.ClearHighLight;
-            if RB.points[i].c1.X > 0 then
-              RB.SetHighLight(RB.points[i].c1)
+            if RB.points[RB.CurrentLayer][i].c1.X >= 0 then
+              RB.SetHighLight(RB.points[RB.CurrentLayer][i].c1,false)
             else
-              RB.SetHighLight(RB.points[i].c2);
+              if RB.points[RB.CurrentLayer][i].c2.X >= 0 then
+                RB.SetHighLight(RB.points[RB.CurrentLayer][i].c2,false)
+              else
+                RB.SetHighLight(RB.points[RB.CurrentLayer][i].c1,true);
+
             pb1.Repaint;
             filechanged := true;
           end;
@@ -1563,7 +1971,7 @@ begin
   if RB.FindCellPoint(Point(lastPoint.X,lastPoint.Y),PT) then
   begin
     RB.ClearHighLight;
-    RB.SetHighLight(pt);
+    RB.SetHighLight(pt,false);
     RB.hasHigh := true;
     pb1.Repaint;
     result := true;
@@ -1622,11 +2030,7 @@ end;
 
 procedure TForm1.S2Click(Sender: TObject);
 begin
-  if SaveDialog1.Execute then
-  begin
-    RB.SaveToFile(SaveDialog1.FileName);
-    filechanged := false;
-  end
+  DoSaveAs;
 end;
 
 procedure TForm1.pb1MouseMove(Sender: TObject; Shift: TShiftState; X, Y: Integer);
@@ -1661,7 +2065,7 @@ begin
   emEdBoard:
     begin
       p := RB.GetCoordsCell(Point(x,y));
-      s := RB.PointToText(p);
+      s := RB.PointToText(p,RB.CurrentLayer);
       statusbar.Caption := s;
 
       if newJumperWire.Left>=0 then
@@ -1672,7 +2076,8 @@ begin
       begin
         if RB.FindConnPoint(Point(X,Y),rbcp) then
         begin
-          fp := RB.GetConnCoord(rbcp.position,rbcp.is_row,RB.cZoom,RB.cOffst);
+          Debug1;
+          fp := RB.GetConnCoord(rbcp.position,rbcp.is_row,RB.cZoom,RB.cOffst,rbcp.zpos);
           R := Rect(Round(fp.X-(cRBpoint-2)*RB.cZoom),Round(fp.Y-(cRBpoint-2)*RB.cZoom),Round(fp.X+(cRBpoint-1)*RB.cZoom),Round(fp.Y+(cRBpoint-1)*RB.cZoom));
           if rbcp.index>=0 then
             pb1.Canvas.Brush.Color := clYellow
@@ -1830,11 +2235,53 @@ begin
   Result := RB.getVisibleCells(mr);
 end;
 
-procedure TForm1.pb1PaintBuffer(Sender: TObject);
+procedure TForm1.DrawOnB32;
 var
   x,y: integer;
-  mr: TRect;
   pt: TPoint;
+begin
+  for x := VisibleCells.Left to VisibleCells.Right do
+    for y := VisibleCells.Top to VisibleCells.Bottom do
+      RB.DrawCell(buffer,Point(x,y),cZoom,cOffst);
+
+  if RB.CurrentLayer then
+  begin
+    RB.DrawBus(buffer,cZoom,cOffst,0);
+    RB.DrawBus(buffer,cZoom,cOffst,1);
+    RB.DrawBus(buffer,cZoom,cOffst,2);
+  end
+  else
+  begin
+    RB.DrawBus(buffer,cZoom,cOffst,3);
+    RB.DrawBus(buffer,cZoom,cOffst,4);
+    for x := 0 to RB.aSize.Y-1 do
+      RB.DrawHTrack(buffer,x,cZoom,cOffst);
+  end;
+  RB.DrawConns(buffer,cZoom,cOffst);
+  RB.DrawLegend(buffer,cZoom,cOffst);
+
+  for x := 0 to HIGH(RB.components) do
+    if compPin.Bottom=x then
+      RB.DrawComponent(RB.components[x],Buffer,cZoom,cOffst,RB.cs.mycolorComponent,compPin.Right)
+    else
+      RB.DrawComponent(RB.components[x],Buffer,cZoom,cOffst,RB.cs.mycolorComponent,-1);
+
+  if compMove.Bottom>=0 then
+    RB.DrawComponent(RB.components[compMove.Bottom],Buffer,cZoom,cOffst,RB.cs.mycolorComponentMove,-1);
+
+  for x := 0 to HIGH(RB.jumperwires) do
+    RB.DrawJumperWire(x,buffer,cZoom,cOffst);
+
+  if newJumperWire.Left>=0 then
+  begin
+    pt := RB.GetCellCoords(newJumperWire.TopLeft,cZoom,cOffst);
+    pb1.Buffer.LineS(pt.X,pt.Y,lastPoint.X,lastPoint.Y,clYellow32);
+  end;
+end;
+
+procedure TForm1.pb1PaintBuffer(Sender: TObject);
+var
+  mr: TRect;
 begin
   RB.cOffst.X := 0; //-scrollX.Position;
   RB.cOffst.Y := 0; //-scrollY.Position;
@@ -1852,36 +2299,100 @@ begin
     pb1.Buffer.FillRectS(mr.Left,mr.Top,mr.Right,mr.Bottom,my1colorBackground);
 
   VisibleCells := fGetVisibleCells;
-
-  for x := VisibleCells.Left to VisibleCells.Right do
-    for y := VisibleCells.Top to VisibleCells.Bottom do
-      RB.DrawCell(pb1,Point(x,y),RB.cZoom,RB.cOffst);
-
-  RB.DrawSideTrack(pb1,RB.cZoom,RB.cOffst,0);
-  RB.DrawSideTrack(pb1,RB.cZoom,RB.cOffst,1);
-  RB.DrawSideTrack(pb1,RB.cZoom,RB.cOffst,2);
-  RB.DrawConns(pb1,RB.cZoom,RB.cOffst);
-  RB.DrawLegend(pb1,RB.cZoom,RB.cOffst);
-
-  for x := 0 to HIGH(RB.components) do
-    if compPin.Bottom=x then
-      RB.DrawComponent(RB.components[x],pb1.Buffer,RB.cZoom,RB.cOffst,RB.cs.mycolorComponent,compPin.Right)
-    else
-      RB.DrawComponent(RB.components[x],pb1.Buffer,RB.cZoom,RB.cOffst,RB.cs.mycolorComponent,-1);
-
-  if compMove.Bottom>=0 then
-    RB.DrawComponent(RB.components[compMove.Bottom],pb1.Buffer,RB.cZoom,RB.cOffst,RB.cs.mycolorComponentMove,-1);
-
-  for x := 0 to HIGH(RB.jumperwires) do
-    RB.DrawJumperWire(x,pb1,RB.cZoom,RB.cOffst);
-
-  if newJumperWire.Left>=0 then
-  begin
-    pt := RB.GetCellCoords(newJumperWire.TopLeft,RB.cZoom,RB.cOffst);
-    pb1.Buffer.LineS(pt.X,pt.Y,lastPoint.X,lastPoint.Y,clYellow32);
-  end;
-
+  DrawOnB32(pb1.Buffer,RB.cZoom,RB.cOffst);
   pb1.Flush;
+end;
+
+function GetPageWidth: Integer;
+begin
+  Result := GetDeviceCaps(Printer.Handle, PHYSICALWIDTH)
+end;
+
+function GetPageHeight: Integer;
+begin
+  Result := GetDeviceCaps(Printer.Handle, PHYSICALHEIGHT)
+end;
+
+function GetPageOffsetLeft: Integer;
+begin
+  Result := GetDeviceCaps(Printer.Handle, PHYSICALOFFSETX)
+end;
+
+function GetPageOffsetRight: Integer;
+begin
+  Result := GetPageWidth - GetPageOffsetLeft - GetDeviceCaps(Printer.Handle, HORZRES)
+end;
+
+function GetPageOffsetTop: Integer;
+begin
+  Result := GetDeviceCaps(Printer.Handle, PHYSICALOFFSETY)
+end;
+
+function GetPageOffsetBottom: Integer;
+begin
+  Result := GetPageHeight - GetPageOffsetTop - GetDeviceCaps(Printer.Handle, VERTRES)
+end;
+
+function GetPixelsPerInchX: Integer;
+begin
+  Result := GetDeviceCaps(Printer.Handle, LOGPIXELSX)
+end;
+
+function GetPixelsPerInchY: Integer;
+begin
+  Result := GetDeviceCaps(Printer.Handle, LOGPIXELSY)
+end;
+
+procedure TForm1.btnPrintClick(Sender: TObject);
+var
+  b32: TBitmap32;
+  P: TPoint;
+  PR: TRect;
+  layer: boolean;
+begin
+  if PrintDialog1.Execute then
+  begin
+    b32 := TBitmap32.Create;
+    p := RB.CalcSize(1);
+    b32.SetSize(p.X,p.Y);
+
+    VisibleCells := Rect(0,0,RB.aSize.X-1,RB.aSize.Y-1);
+
+    layer := RB.CurrentLayer;
+    RB.CurrentLayer := true;
+    RB.cs.mycolorBackground := clWhite32;
+    RB.cs.mycolorLegendText := clBlack32;
+    B32.Clear(clWhite32);
+    DrawOnB32(b32,0.95,Point(0,0));
+    Printer.BeginDoc;
+
+    PR := printer.Canvas.ClipRect;
+    PR.Left := PR.Left + GetPageOffsetLeft + Round(RB.aSize.X * cRBcellSize * 0.1);
+    PR.Top := PR.Top + GetPageOffsetTop + Round(RB.aSize.Y * cRBcellSize * 0.1);
+    PR.Right := PR.Right - GetPageOffsetRight;
+    PR.Bottom := PR.Bottom - GetPageOffsetBottom;
+
+    b32.DrawTo(printer.Canvas.Handle,PR,b32.BoundsRect);
+
+    if RB.DoubleSide then
+    begin
+      RB.CurrentLayer := false;
+      RB.LoadDefaultColorScheme;
+      RB.cs.mycolorBackground := clWhite32;
+      RB.cs.mycolorLegendText := clBlack32;
+      B32.Clear(clWhite32);
+      DrawOnB32(b32,0.95,Point(0,0));
+      Printer.NewPage;
+      b32.DrawTo(printer.Canvas.Handle,PR,b32.BoundsRect);
+    end;
+    RB.CurrentLayer := layer;
+
+    Printer.EndDoc;
+
+    b32.Free;
+  end;
+  RB.LoadDefaultColorScheme;
+  pb1.Refresh;
 end;
 
 procedure TForm1.scroll1MyScroll(Sender: TObject);
@@ -1931,6 +2442,8 @@ begin
       Position := Range;
     pb1.Repaint;
     filechanged := false;
+    btnTop.Down := true;
+    btnTopClick(nil);
   end;
 end;
 
@@ -1960,11 +2473,26 @@ begin
     filechanged := false;
   end
   else
-    if SaveDialog1.Execute then
-    begin
-      RB.SaveToFile(SaveDialog1.FileName);
-      filechanged := false;
-    end;
+    DoSaveAs;
+end;
+
+procedure TForm1.btnTopClick(Sender: TObject);
+begin
+  if btnTop.Down then
+    RB.CurrentLayer := true;
+  if btnBottom.Down then
+    RB.CurrentLayer := false;
+  RB.LoadDefaultColorScheme;
+
+  if btnBottom.Down then
+  begin
+    btnEditBoard.Down := true;
+  end;
+
+  btnEditComponent.Enabled := btnTop.Down;
+  btnEditBoardClick(nil);
+
+  pb1.Repaint;
 end;
 
 procedure TForm1.btnEditBoardClick(Sender: TObject);
@@ -2000,11 +2528,13 @@ begin
   if sl.Count>0 then
   begin
     ClearBoard;
+    CurrentLayer := true;
     for z := 0 to sl.Count-1 do
       flDecode(sl[z]);
     for z := 0 to HIGH(components) do
       components[z].NormalizePins(true);
   end;
+  CurrentLayer := true;
   sl.Free;
 end;
 
@@ -2016,16 +2546,35 @@ var
 begin
   sl := TStringList.Create;
 
-  sl.Add(''' connections');
-  for z := 0 to HIGH(points) do
-    with points[z] do
-    begin
-      s := PointToText(c2)+ConnLetter(c2,z)+':'+PointToText(points[z].c1)+ConnLetter(c1,z);
-      sl.Add(s);
-    end;
+  if Length(points[true])>0 then
+  begin
+    sl.Add('TOP '' TOP connections');
+    for z := 0 to HIGH(points[true]) do
+      with points[true][z] do
+      begin
+        s := PointToText(c2,true)+ConnLetter(c2,z,true)+':'+PointToText(c1,true)+ConnLetter(c1,z,true);
+        sl.Add(s);
+      end;
+  end;
+
+  if Length(points[false])>0 then
+  begin
+    sl.Add('');
+    sl.Add('BOTTOM '' BOTTOM connections');
+    for z := 0 to HIGH(points[false]) do
+      with points[false][z] do
+      begin
+        if is_row then
+          s := PointToText(c1,true)+':*'+hTrackLetter(zpos)
+        else
+          s := '*'+hTrackLetter(zpos)+IntToStr(aSize.Y-position.Y)+':*'+hTrackBus(zpos);
+        sl.Add(s);
+      end;
+  end;
 
   sl.Add('');
   sl.Add(''' components');
+  sl.Add('TOP');
   for z := 0 to HIGH(components) do
     sl.Add(components[z].GetAsString);
 
@@ -2033,7 +2582,7 @@ begin
   sl.Add(''' Jumper wires');
   for z := 0 to HIGH(jumperwires) do
     begin
-      s := PointToText(jumperwires[z].r.TopLeft)+'J'+':'+PointToText(jumperwires[z].r.BottomRight)+'J';
+      s := PointToText(jumperwires[z].r.TopLeft,true)+'J'+':'+PointToText(jumperwires[z].r.BottomRight,true)+'J';
       sl.Add(s);
     end;
 
@@ -2049,7 +2598,8 @@ begin
   for z := 0 to HIGH(components) do
     FreeAndNil(components[z]);
   SetLength(components,0);
-  SetLength(points,0);
+  SetLength(points[true],0);
+  SetLength(points[false],0);
   SetLength(jumperwires,0);
 end;
 
@@ -2060,7 +2610,7 @@ var
 begin
   s := '';
   for z := 0 to HIGH(pins) do
-    s := s + id + '/' + pins[z].name + ':' + parent.PointToText(AddPoints(position,pins[z].pos)) + ' ';
+    s := s + id + '/' + pins[z].name + ':' + parent.PointToText(AddPoints(position,pins[z].pos),parent.CurrentLayer) + ' ';
   result := Trim(s);
 end;
 
@@ -2085,14 +2635,22 @@ begin
     rr[z].Y := parent.aSize.Y - (rmax - rr[z].Y + 1);
 
   for z := 0 to HIGH(pins) do
-    s := s + pins[z].name + ':' + parent.PointToText(Point(pins[z].pos.X,rr[z].Y)) + ' ';
+    s := s + pins[z].name + ':' + parent.PointToText(Point(pins[z].pos.X,rr[z].Y),parent.CurrentLayer) + ' ';
   result := Trim(s);
 end;
 
 procedure TRoutaBoard.LoadDefaultColorScheme;
 begin
-  cs.mycolorBoard := my1colorBoard;
-  cs.mycolorBrdCircle := my1colorBrdCircle;
+  if CurrentLayer then
+  begin
+    cs.mycolorBoard := my1colorBoard;
+    cs.mycolorBrdCircle := my1colorBrdCircle;
+  end
+  else
+  begin
+    cs.mycolorBoard := my2colorBoard;
+    cs.mycolorBrdCircle := my2colorBrdCircle;
+  end;
   cs.mycolorBrdHigh := my1colorBrdHigh;
   cs.mycolorBackground := my1colorBackground;
   cs.mycolorLegendText := my1colorLegendText;
@@ -2208,33 +2766,45 @@ var
   mi: TMenuItem;
   p: TPoint;
   s: string;
+  sl2: TStringList;
 begin
   sl := TStringList.Create;
+  sl2 := TStringList.Create;
   sl.LoadFromFile(ExtractFilePath(Application.ExeName)+'\BoardTypes.txt');
   for z := 0 to sl.Count-1 do
   begin
     i := pos('$',sl[z]);
-    s := Copy(sl[z],i+1,9999);
-    p.X := StrToIntDef(Copy(s,1,pos(',',s)-1),1);
-    p.Y := StrToIntDef(Copy(s,pos(',',s)+1),9999);
+    sl2.CommaText := Copy(sl[z],i+1,9999);
+    p.X := StrToIntDef(sl2[0],10);
+    p.Y := StrToIntDef(sl2[1],10);
     mi := TMenuItem.Create(BoardSelPopup);
     MI.Caption := Copy(sl[z],1,i-1);
     MI.Tag := P.X or P.Y shl 16;
+    if sl2.Count>2 then
+      if StrToIntDef(sl2[2],1) = 2 then
+        MI.Tag := MI.Tag or $80000000;
     MI.OnClick := SelectBoardClick;
     BoardSelPopup.Items.Add(MI);
   end;
+  sl.Free;
+  sl2.Free;
 end;
 
 procedure TForm1.SelectBoardClick(Sender: TObject);
 var
   p: TPoint;
+  b: boolean;
+  i: integer;
 begin
   if MessageDlg('Change Board Type. Are you sure?',mtWarning,mbYesNoCancel,0)=mrYes then
   begin
-    p.X := (Sender as TComponent).Tag and $FFFF;
-    P.Y := ((Sender as TComponent).Tag shr 16) and $FFFF;
-    RB.InitSize(p);
+    i := (Sender as TComponent).Tag;
+    p.X := i and $7FFF;
+    P.Y := (i shr 16) and $7FFF;
+    b := i and $80000000 <> 0;
+    RB.InitSize(p,b);
     ChangeZoom(main_zoom);
+    btnBottom.Enabled := RB.DoubleSide;
     Application.ProcessMessages;
     with scroll1.VertScrollBar do
       Position := Range;
@@ -2256,8 +2826,8 @@ var
   i: integer;
 begin
   i := RB.FindJumperWire(pt1);
-  ppAddJumperWire.Enabled := i<0;
-  ppDeleteJumperWire.Enabled := i>=0;
+  ppAddJumperWire.Enabled := (i<0) and RB.CurrentLayer;
+  ppDeleteJumperWire.Enabled := (i>=0) and RB.CurrentLayer;
   ppCancelJumperWire.Enabled := newJumperWire.Left>=0;
 end;
 
@@ -2299,6 +2869,31 @@ end;
 function TForm1.isDragMove;
 begin
   result := (Abs(pt1.X-pt2.X)>2) or (Abs(pt1.Y-pt2.Y)>2);
+end;
+
+function TRoutaBoard.GetRealDblSidePoint;
+begin
+  if aLayer then
+    result := pt
+  else
+    result := Point(aSize.X-pt.X-1,pt.Y);
+end;
+
+procedure TForm1.DoSaveAs;
+begin
+  if SaveDialog1.Execute then
+  begin
+    if FileExists(SaveDialog1.FileName) then
+      if MessageDlg('File exist. Overwrite?',mtWarning,mbYesNoCancel,0) <> mrYes then
+        exit;
+    RB.SaveToFile(SaveDialog1.FileName);
+    filechanged := false;
+  end
+end;
+
+procedure TForm1.Debug1;
+begin
+{}
 end;
 
 end.
